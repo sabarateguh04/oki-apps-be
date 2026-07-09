@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — OKI Maintenance</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="content">
+  <div id="topbar-slot"></div>
+
+  <div class="page-body">
+
+    <!-- KPI: Order -->
+    <div class="row g-3 mb-2">
+      <div class="col-6 col-lg"><div class="kpi-card kpi-blue"><i class="bi bi-clipboard-data icon"></i>
+        <div class="n" id="kpi-total">-</div><div class="l">TOTAL ORDER</div></div></div>
+      <div class="col-6 col-lg"><div class="kpi-card kpi-orange"><i class="bi bi-hourglass-split icon"></i>
+        <div class="n" id="kpi-pending">-</div><div class="l">PENDING</div></div></div>
+      <div class="col-6 col-lg"><div class="kpi-card kpi-purple"><i class="bi bi-arrow-repeat icon"></i>
+        <div class="n" id="kpi-progress">-</div><div class="l">PROGRESS</div></div></div>
+      <div class="col-6 col-lg"><div class="kpi-card kpi-green"><i class="bi bi-check-circle icon"></i>
+        <div class="n" id="kpi-selesai">-</div><div class="l">SELESAI</div></div></div>
+      <div class="col-6 col-lg"><div class="kpi-card kpi-red"><i class="bi bi-check2-square icon"></i>
+        <div class="n" id="kpi-approval">-</div><div class="l">MENUNGGU APPROVAL</div></div></div>
+    </div>
+
+    <!-- KPI: Teknisi -->
+    <div class="row g-3 mb-4">
+      <div class="col-4"><div class="kpi-card kpi-teal"><i class="bi bi-broadcast icon"></i>
+        <div class="n" id="kpi-ready">-</div><div class="l">TEKNISI READY</div></div></div>
+      <div class="col-4"><div class="kpi-card kpi-orange"><i class="bi bi-person-walking icon"></i>
+        <div class="n" id="kpi-onduty">-</div><div class="l">TEKNISI BERTUGAS</div></div></div>
+      <div class="col-4"><div class="kpi-card kpi-blue" style="background:linear-gradient(135deg,#6c757d,#495057);"><i class="bi bi-person-x icon"></i>
+        <div class="n" id="kpi-offline">-</div><div class="l">TEKNISI OFFLINE</div></div></div>
+    </div>
+
+    <div class="row g-3">
+      <!-- Order terbaru -->
+      <div class="col-lg-6">
+        <div class="card mb-3">
+          <div class="card-header"><i class="bi bi-list-task"></i> Order Terbaru</div>
+          <div class="card-body p-0">
+            <table class="table mb-0">
+              <thead><tr><th>No. Order</th><th>Customer</th><th>Status</th><th>Prioritas</th></tr></thead>
+              <tbody id="recent-orders-body">
+                <tr><td colspan="4"><div class="skeleton" style="height:18px;margin:8px 0;"></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aktivitas terbaru -->
+      <div class="col-lg-6">
+        <div class="card mb-3">
+          <div class="card-header"><i class="bi bi-activity"></i> Aktivitas Terbaru</div>
+          <div class="card-body" id="activities-body" style="max-height:360px;overflow-y:auto;">
+            <div class="skeleton" style="height:18px;margin:8px 0;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Peta teknisi -->
+    <div class="card">
+      <div class="card-header"><i class="bi bi-geo-alt"></i> Lokasi Teknisi Aktif <span id="map-count" class="text-muted fw-normal"></span></div>
+      <div class="card-body p-0">
+        <div id="tech-map" style="height:420px;border-radius:0 0 16px 16px;"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/api.js"></script>
+<script src="js/layout.js"></script>
+<script>
+  const session = requireAuth(['staff']);
+  if (session) {
+    renderLayout({ active: 'dashboard', title: 'Dashboard' });
+    boot();
+  }
+
+  let map = null;
+  let mapMarkers = {};
+  let socket = null;
+
+  function boot() {
+    initMap();
+    loadKpi();
+    loadMonitoring();
+    connectSocket();
+    setInterval(loadKpi, 20000);
+    setInterval(loadMonitoring, 20000);
+  }
+
+  function connectSocket() {
+    socket = io({ transports: ['websocket'] });
+    socket.on('connect', () => socket.emit('register-dashboard'));
+    // Order/teknisi apapun berubah -> refresh ringan
+    ['order-created','order-approved','order-rejected','order-assigned','order-status-updated','order-updated']
+      .forEach(evt => socket.on(evt, () => { loadKpi(); loadMonitoring(); }));
+    socket.on('technician-status', () => { loadKpi(); loadMonitoring(); });
+    socket.on('technician-location', (data) => {
+      upsertMarker({ id: data.technicianId, latitude: data.latitude, longitude: data.longitude });
+    });
+  }
+
+  async function loadKpi() {
+    try {
+      const d = await api('/api/dashboard/kpi');
+      const o = d.order_kpi, t = d.technician_kpi;
+      document.getElementById('kpi-total').textContent    = o.total_order || 0;
+      document.getElementById('kpi-pending').textContent  = o.pending || 0;
+      document.getElementById('kpi-progress').textContent = o.progress || 0;
+      document.getElementById('kpi-selesai').textContent  = o.selesai || 0;
+      document.getElementById('kpi-approval').textContent = o.approval_pending || 0;
+      document.getElementById('kpi-ready').textContent    = t.ready || 0;
+      document.getElementById('kpi-onduty').textContent   = t.on_duty || 0;
+      document.getElementById('kpi-offline').textContent  = t.offline || 0;
+    } catch (e) { console.error(e); }
+  }
+
+  async function loadMonitoring() {
+    try {
+      const d = await api('/api/dashboard/monitoring');
+      renderRecentOrders(d.recent_orders);
+      renderActivities(d.recent_activities);
+      renderTechLocations(d.technician_locations);
+    } catch (e) { console.error(e); }
+  }
+
+  function renderRecentOrders(rows) {
+    const body = document.getElementById('recent-orders-body');
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Belum ada order</td></tr>'; return; }
+    body.innerHTML = rows.map(o => `
+      <tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+        <td><b>${o.order_no}</b></td>
+        <td>${escapeHtml(o.nama_perusahaan)}</td>
+        <td>${statusBadge(o.status)}</td>
+        <td>${priorityBadge(o.priority)}</td>
+      </tr>`).join('');
+  }
+
+  function renderActivities(rows) {
+    const body = document.getElementById('activities-body');
+    if (!rows.length) { body.innerHTML = '<div class="empty-state"><i class="bi bi-activity"></i><p>Belum ada aktivitas</p></div>'; return; }
+    const iconFor = { CREATED:'bi-plus-circle', APPROVED:'bi-check2', REJECTED:'bi-x-circle',
+      PRE_BAYAR_DONE:'bi-cash-coin', JASA_TF_DONE:'bi-bank', ASSIGNED:'bi-person-check',
+      ON_THE_WAY:'bi-signpost', IN_PROGRESS:'bi-tools', DONE:'bi-check-circle', CANCELLED:'bi-slash-circle' };
+    body.innerHTML = rows.map(a => `
+      <div class="tl-item">
+        <div class="tl-dot"><i class="bi ${iconFor[a.event_type] || 'bi-dot'}"></i></div>
+        <div>
+          <div class="tl-title">${a.order_no} — ${a.event_type.replace(/_/g,' ')}</div>
+          ${a.note ? `<div class="tl-note">${escapeHtml(a.note)}</div>` : ''}
+          <div class="tl-time">${relTime(a.created_at)}</div>
+        </div>
+      </div>`).join('');
+  }
+
+  function initMap() {
+    map = L.map('tech-map').setView([-6.4, 106.8], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+  }
+
+  function techIcon(status) {
+    const color = status === 'ON_DUTY' ? '#fd7e14' : '#198754';
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:26px;height:26px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+  }
+
+  function renderTechLocations(rows) {
+    document.getElementById('map-count').textContent = `(${rows.length} aktif)`;
+    const seen = new Set();
+    rows.forEach(t => { upsertMarker(t); seen.add(String(t.id)); });
+    Object.keys(mapMarkers).forEach(id => {
+      if (!seen.has(id)) { map.removeLayer(mapMarkers[id]); delete mapMarkers[id]; }
+    });
+  }
+
+  function upsertMarker(t) {
+    const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
+    if (!lat && !lng) return;
+    const id = String(t.id);
+    if (mapMarkers[id]) {
+      mapMarkers[id].setLatLng([lat, lng]);
+    } else {
+      const marker = L.marker([lat, lng], { icon: techIcon(t.status) }).addTo(map);
+      if (t.nama) marker.bindPopup(`<b>${escapeHtml(t.nama)}</b><br>${t.status || ''}`);
+      mapMarkers[id] = marker;
+    }
+  }
+</script>
+</body>
+</html>

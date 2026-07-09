@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detail Order — OKI Maintenance</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="content">
+  <div id="topbar-slot"></div>
+
+  <div class="page-body" id="page-body">
+    <div class="skeleton" style="height:300px;"></div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/layout.js"></script>
+<script>
+  const session = requireAuth(['staff']);
+  const orderId = new URLSearchParams(location.search).get('id');
+  let currentOrder = null;
+
+  if (session) {
+    renderLayout({ active: 'orders', title: 'Detail Order' });
+    if (!orderId) {
+      document.getElementById('page-body').innerHTML = '<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><p>ID order tidak ditemukan di URL</p></div>';
+    } else {
+      loadOrder();
+    }
+  }
+
+  const CATEGORY_LABEL = { PREVENTIVE:'Preventive', CORRECTIVE:'Corrective', INSTALLATION:'Installation', INSPECTION:'Inspection' };
+
+  async function loadOrder() {
+    try {
+      const d = await api(`/api/orders/${orderId}`);
+      currentOrder = d.order;
+      render(d.order, d.timeline);
+    } catch (e) {
+      document.getElementById('page-body').innerHTML = `<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><p>${e.message}</p></div>`;
+    }
+  }
+
+  function render(o, timeline) {
+    const canApprove = ['ADMIN','ATASAN'].includes(session.role) && o.approval_status === 'PENDING';
+    const canFinance  = ['ADMIN','FINANCE'].includes(session.role);
+    const elig = o.assign_eligibility;
+
+    document.getElementById('page-body').innerHTML = `
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+        <a href="orders.html" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+        <h4 class="mb-0 flex-grow-1">${o.order_no}</h4>
+        ${statusBadge(o.status)} ${priorityBadge(o.priority)} ${approvalBadge(o.approval_status)}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-8">
+
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-info-circle"></i> Informasi Order</div>
+            <div class="card-body">
+              <div class="row mb-2"><div class="col-4 text-muted small">Customer</div><div class="col-8 fw-semibold">${escapeHtml(o.nama_perusahaan)}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">PIC</div><div class="col-8">${escapeHtml(o.pic_nama || '-')} ${o.pic_hp ? '· ' + escapeHtml(o.pic_hp) : ''}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Alamat</div><div class="col-8">${escapeHtml(o.customer_alamat || '-')}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Kategori</div><div class="col-8">${CATEGORY_LABEL[o.category] || o.category}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Deskripsi</div><div class="col-8">${escapeHtml(o.description || '-')}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Dibuat</div><div class="col-8">${fmtDate(o.created_at)}</div></div>
+              <div class="row"><div class="col-4 text-muted small">Teknisi</div><div class="col-8">${o.technician_nama ? escapeHtml(o.technician_nama) + (o.technician_hp ? ' · '+escapeHtml(o.technician_hp) : '') : '<span class="text-muted">Belum ditugaskan</span>'}</div></div>
+            </div>
+          </div>
+
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-cash-coin"></i> Biaya & Pembayaran</div>
+            <div class="card-body">
+              <div class="row mb-2"><div class="col-6 text-muted small">Biaya Jasa</div><div class="col-6 text-end fw-semibold">${rupiah(o.biaya_jasa)}</div></div>
+              <div class="row mb-2"><div class="col-6 text-muted small">Biaya Sparepart</div><div class="col-6 text-end fw-semibold">${rupiah(o.biaya_sparepart)}</div></div>
+              <hr class="my-2">
+              <div class="row mb-3"><div class="col-6 fw-bold">Total</div><div class="col-6 text-end fw-bold text-primary">${rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart))}</div></div>
+
+              ${o.has_pre_bayar ? `
+              <div class="d-flex justify-content-between align-items-center border rounded-3 p-2 mb-2">
+                <div><i class="bi bi-box-seam"></i> Pre-Bayar Material (${rupiah(o.pre_bayar_amount)})</div>
+                ${o.pre_bayar_status === 'DONE'
+                  ? '<span class="badge badge-status-DONE">Selesai</span>'
+                  : (canFinance ? `<button class="btn btn-sm btn-success" onclick="markPreBayarDone()">Tandai Selesai</button>` : '<span class="badge badge-approval-PENDING">Menunggu</span>')}
+              </div>` : ''}
+
+              <div class="d-flex justify-content-between align-items-center border rounded-3 p-2">
+                <div><i class="bi bi-bank"></i> Jasa Teknisi (bayar ${o.payment_timing === 'SEBELUM' ? 'SEBELUM' : 'SESUDAH'} eksekusi)</div>
+                ${o.payment_timing !== 'SEBELUM'
+                  ? '<span class="text-muted small">Tidak perlu dicek di muka</span>'
+                  : (o.jasa_teknisi_transfer_status === 'DONE'
+                      ? '<span class="badge badge-status-DONE">Selesai</span>'
+                      : (canFinance ? `<button class="btn btn-sm btn-success" onclick="markJasaTeknisiDone()">Tandai TF Selesai</button>` : '<span class="badge badge-approval-PENDING">Menunggu</span>'))}
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><i class="bi bi-clock-history"></i> Timeline Pekerjaan</div>
+            <div class="card-body">
+              ${timeline.length ? timeline.map(t => `
+                <div class="tl-item">
+                  <div class="tl-dot"><i class="bi bi-dot"></i></div>
+                  <div>
+                    <div class="tl-title">${t.event_type.replace(/_/g,' ')}</div>
+                    ${t.note ? `<div class="tl-note">${escapeHtml(t.note)}</div>` : ''}
+                    <div class="tl-time">${fmtDate(t.created_at)}</div>
+                  </div>
+                </div>`).join('') : '<div class="empty-state"><i class="bi bi-clock-history"></i><p>Belum ada aktivitas</p></div>'}
+            </div>
+          </div>
+
+        </div>
+
+        <div class="col-lg-4">
+
+          ${canApprove ? `
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-check2-square"></i> Approval Atasan</div>
+            <div class="card-body d-grid gap-2">
+              <button class="btn btn-success" onclick="approveOrder()"><i class="bi bi-check-lg"></i> Setujui Order</button>
+              <button class="btn btn-outline-danger" onclick="rejectOrder()"><i class="bi bi-x-lg"></i> Tolak Order</button>
+            </div>
+          </div>` : ''}
+
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-person-check"></i> Assign Teknisi</div>
+            <div class="card-body">
+              ${o.technician_id ? `
+                <div class="d-flex align-items-center gap-2">
+                  <div class="av bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-weight:700;">${(o.technician_nama||'?').slice(0,1).toUpperCase()}</div>
+                  <div><b>${escapeHtml(o.technician_nama)}</b><br><span class="text-muted small">${escapeHtml(o.technician_hp||'')}</span></div>
+                </div>
+              ` : elig.eligible ? `
+                <select class="form-select mb-2" id="assign-technician-select"><option value="">Memuat teknisi...</option></select>
+                <button class="btn btn-primary w-100" onclick="assignTechnician()"><i class="bi bi-send-check"></i> Assign Teknisi</button>
+              ` : `
+                <div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tombol Assign disembunyikan</b><br>${elig.reason}</div></div>
+              `}
+            </div>
+          </div>
+
+          ${['ASSIGNED','ON_THE_WAY','IN_PROGRESS'].includes(o.status) ? `
+          <div class="card">
+            <div class="card-header"><i class="bi bi-arrow-repeat"></i> Update Status Pekerjaan</div>
+            <div class="card-body d-grid gap-2">
+              ${o.status === 'ASSIGNED' ? `<button class="btn btn-warning" onclick="updateStatus('ON_THE_WAY')"><i class="bi bi-signpost"></i> Tandai Menuju Lokasi</button>` : ''}
+              ${o.status === 'ON_THE_WAY' ? `<button class="btn btn-orange" style="background:#fd7e14;color:#fff;" onclick="updateStatus('IN_PROGRESS')"><i class="bi bi-tools"></i> Tandai Dikerjakan</button>` : ''}
+              ${o.status === 'IN_PROGRESS' ? `<button class="btn btn-success" onclick="updateStatus('DONE')"><i class="bi bi-check-lg"></i> Tandai Selesai</button>` : ''}
+              <button class="btn btn-outline-danger btn-sm" onclick="updateStatus('CANCELLED')"><i class="bi bi-slash-circle"></i> Batalkan Order</button>
+            </div>
+          </div>` : ''}
+
+        </div>
+      </div>
+    `;
+
+    if (o.technician_id === null && elig.eligible) loadTechnicianOptions();
+  }
+
+  async function loadTechnicianOptions() {
+    const sel = document.getElementById('assign-technician-select');
+    if (!sel) return;
+    try {
+      const d = await api('/api/technicians?status=READY');
+      if (!d.technicians.length) {
+        sel.innerHTML = '<option value="">Tidak ada teknisi READY saat ini</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">Pilih teknisi...</option>' +
+        d.technicians.map(t => `<option value="${t.id}">${escapeHtml(t.nama)}${t.skill ? ' — '+escapeHtml(t.skill) : ''}</option>`).join('');
+    } catch (e) {
+      sel.innerHTML = '<option value="">Gagal memuat teknisi</option>';
+    }
+  }
+
+  async function approveOrder() {
+    if (!confirm('Setujui order ini?')) return;
+    try {
+      await api(`/api/orders/${orderId}/approve`, { method: 'POST', body: JSON.stringify({ approved_by: session.id }) });
+      toast('Order disetujui', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function rejectOrder() {
+    const note = prompt('Alasan penolakan (opsional):');
+    if (note === null) return;
+    try {
+      await api(`/api/orders/${orderId}/reject`, { method: 'POST', body: JSON.stringify({ rejected_by: session.id, note }) });
+      toast('Order ditolak', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function markPreBayarDone() {
+    try {
+      await api(`/api/orders/${orderId}/pre-bayar-done`, { method: 'POST', body: JSON.stringify({ marked_by: session.id }) });
+      toast('Pre-bayar ditandai selesai', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function markJasaTeknisiDone() {
+    try {
+      await api(`/api/orders/${orderId}/jasa-teknisi-done`, { method: 'POST', body: JSON.stringify({ marked_by: session.id }) });
+      toast('Transfer jasa teknisi ditandai selesai', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function assignTechnician() {
+    const sel = document.getElementById('assign-technician-select');
+    const technicianId = Number(sel.value);
+    if (!technicianId) { toast('Pilih teknisi dulu', 'error'); return; }
+    try {
+      const d = await api(`/api/orders/${orderId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ technician_id: technicianId, assigned_by: session.id }),
+      });
+      toast(d.message, 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function updateStatus(status) {
+    if (status === 'CANCELLED' && !confirm('Yakin batalkan order ini?')) return;
+    try {
+      await api(`/api/orders/${orderId}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status, actor_type: 'USER', actor_id: session.id }),
+      });
+      toast('Status order diperbarui', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+</script>
+</body>
+</html>
