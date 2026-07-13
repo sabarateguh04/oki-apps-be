@@ -1,7 +1,9 @@
 const express = require('express');
 const pool = require('../db');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+router.use(requireAuth);
 
 /* ═══════════════════════════════════════════════════
    GET /api/dashboard/kpi
@@ -46,10 +48,12 @@ router.get('/monitoring', async (req, res) => {
   try {
     const [recentOrders] = await pool.query(`
       SELECT o.id, o.order_no, o.status, o.priority, o.approval_status,
-             c.nama_perusahaan, t.nama AS technician_nama, o.created_at
+             c.nama_perusahaan, o.created_at,
+             (SELECT GROUP_CONCAT(t.nama SEPARATOR ', ')
+                FROM oki_order_technicians ot JOIN oki_technicians t ON t.id = ot.technician_id
+                WHERE ot.order_id = o.id AND ot.status = 'ASSIGNED') AS technician_nama
       FROM oki_orders o
       JOIN oki_customers c ON c.id = o.customer_id
-      LEFT JOIN oki_technicians t ON t.id = o.technician_id
       ORDER BY o.created_at DESC
       LIMIT 10
     `);
@@ -98,11 +102,12 @@ router.get('/analytics', async (req, res) => {
 
     const [technicianPerformance] = await pool.query(`
       SELECT t.id, t.nama,
-             COUNT(o.id) AS total_order,
+             COUNT(ot.order_id) AS total_order,
              SUM(o.status = 'DONE') AS total_selesai,
              ROUND(AVG(CASE WHEN o.status='DONE' THEN TIMESTAMPDIFF(MINUTE, o.assigned_at, o.selesai_at) END)) AS avg_durasi_menit
       FROM oki_technicians t
-      LEFT JOIN oki_orders o ON o.technician_id = t.id
+      LEFT JOIN oki_order_technicians ot ON ot.technician_id = t.id AND ot.status = 'ASSIGNED'
+      LEFT JOIN oki_orders o ON o.id = ot.order_id
       WHERE t.is_active = 1
       GROUP BY t.id, t.nama
       ORDER BY total_selesai DESC

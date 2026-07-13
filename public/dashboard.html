@@ -85,14 +85,13 @@
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
+  let map = null;
+  let mapMarkers = {};
+  let socket = null;
   if (session) {
     renderLayout({ active: 'dashboard', title: 'Dashboard' });
     boot();
   }
-
-  let map = null;
-  let mapMarkers = {};
-  let socket = null;
 
   function boot() {
     initMap();
@@ -118,7 +117,7 @@
   async function loadKpi() {
     try {
       const d = await api('/api/dashboard/kpi');
-      const o = d.order_kpi, t = d.technician_kpi;
+      const o = d.order_kpi || {}, t = d.technician_kpi || {};
       document.getElementById('kpi-total').textContent    = o.total_order || 0;
       document.getElementById('kpi-pending').textContent  = o.pending || 0;
       document.getElementById('kpi-progress').textContent = o.progress || 0;
@@ -127,23 +126,36 @@
       document.getElementById('kpi-ready').textContent    = t.ready || 0;
       document.getElementById('kpi-onduty').textContent   = t.on_duty || 0;
       document.getElementById('kpi-offline').textContent  = t.offline || 0;
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      // Sebelumnya error di sini cuma console.error -> user cuma lihat "-"
+      // tanpa tahu kenapa. Sekarang ditampilin jelas biar gampang didiagnosa
+      // (mis. token expired, DB down, dsb).
+      console.error('[dashboard kpi]', e);
+      toast('Gagal memuat data KPI: ' + e.message, 'error');
+    }
   }
 
   async function loadMonitoring() {
     try {
       const d = await api('/api/dashboard/monitoring');
-      renderRecentOrders(d.recent_orders);
-      renderActivities(d.recent_activities);
-      renderTechLocations(d.technician_locations);
-    } catch (e) { console.error(e); }
+      renderRecentOrders(d.recent_orders || []);
+      renderActivities(d.recent_activities || []);
+      renderTechLocations(d.technician_locations || []);
+    } catch (e) {
+      console.error('[dashboard monitoring]', e);
+      toast('Gagal memuat data monitoring: ' + e.message, 'error');
+      document.getElementById('recent-orders-body').innerHTML =
+        `<tr><td colspan="4" class="text-center text-danger py-4">${escapeHtml(e.message)}</td></tr>`;
+      document.getElementById('activities-body').innerHTML =
+        `<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><p>${escapeHtml(e.message)}</p></div>`;
+    }
   }
 
   function renderRecentOrders(rows) {
     const body = document.getElementById('recent-orders-body');
     if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Belum ada order</td></tr>'; return; }
     body.innerHTML = rows.map(o => `
-      <tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+      <tr class="clickable" onclick="location.href='order-detail?id=${o.id}'">
         <td><b>${o.order_no}</b></td>
         <td>${escapeHtml(o.nama_perusahaan)}</td>
         <td>${statusBadge(o.status)}</td>
@@ -173,6 +185,12 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map);
+    // PENTING: kalau container map di-render sebelum layout/topbar selesai
+    // di-inject, Leaflet salah hitung ukuran container -> peta jadi blank/
+    // abu-abu sampai user resize window. invalidateSize() maksa Leaflet
+    // hitung ulang setelah DOM benar-benar stabil.
+    setTimeout(() => map.invalidateSize(), 300);
+    window.addEventListener('resize', () => map.invalidateSize());
   }
 
   function techIcon(status) {

@@ -6,7 +6,12 @@
 <title>Form Order — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .item-row{ background:#f8f9fb; border-radius:10px; padding:10px; margin-bottom:8px; }
+  #trouble-map{ height:260px; border-radius:10px; }
+</style>
 </head>
 <body>
 
@@ -15,15 +20,16 @@
 
   <div class="page-body">
     <div class="row justify-content-center">
-      <div class="col-lg-8">
+      <div class="col-lg-9">
         <div class="card">
           <div class="card-header"><i class="bi bi-plus-lg"></i> Buat Order Baru</div>
           <div class="card-body">
             <form id="order-form" onsubmit="return submitOrder(event)">
 
+              <h6 class="fw-bold mb-3"><i class="bi bi-building"></i> Customer & Pekerjaan</h6>
               <div class="mb-3">
                 <label class="form-label">Customer *</label>
-                <select class="form-select" id="customer_id" required>
+                <select class="form-select" id="customer_id" required onchange="onCustomerChange()">
                   <option value="">Memuat customer...</option>
                 </select>
               </div>
@@ -54,44 +60,77 @@
               </div>
 
               <hr>
-              <h6 class="fw-bold mb-3"><i class="bi bi-cash-coin"></i> Skema Pembayaran</h6>
-
-              <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" id="has_pre_bayar" onchange="togglePreBayar()">
-                <label class="form-check-label" for="has_pre_bayar">Ada pre-bayar material/equipment</label>
-              </div>
-
-              <div class="row" id="pre-bayar-row" style="display:none;">
-                <div class="col-md-6 mb-3">
-                  <label class="form-label">Nominal Pre-Bayar</label>
-                  <input type="number" class="form-control" id="pre_bayar_amount" placeholder="0">
-                </div>
-              </div>
-
-              <div class="mb-3">
-                <label class="form-label">Timing Bayar Jasa Teknisi</label>
-                <div class="btn-group w-100" role="group">
-                  <input type="radio" class="btn-check" name="payment_timing" id="pt-sebelum" value="SEBELUM" autocomplete="off">
-                  <label class="btn btn-outline-primary" for="pt-sebelum">Bayar Sebelum Eksekusi</label>
-                  <input type="radio" class="btn-check" name="payment_timing" id="pt-sesudah" value="SESUDAH" autocomplete="off" checked>
-                  <label class="btn btn-outline-primary" for="pt-sesudah">Bayar Sesudah Eksekusi</label>
-                </div>
-                <div class="form-text">Kalau "Sebelum", teknisi baru bisa di-assign setelah Finance menandai transfer jasa teknisi selesai.</div>
-              </div>
-
+              <h6 class="fw-bold mb-3"><i class="bi bi-geo-alt"></i> Lokasi Pekerjaan</h6>
               <div class="row">
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Estimasi Biaya Jasa</label>
-                  <input type="number" class="form-control" id="biaya_jasa" placeholder="0">
+                  <label class="form-label">Wilayah</label>
+                  <input type="text" class="form-control" id="wilayah" placeholder="mis. Depok, Jawa Barat">
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Estimasi Biaya Sparepart</label>
-                  <input type="number" class="form-control" id="biaya_sparepart" placeholder="0">
+                  <label class="form-label">Titik Lokasi Trouble (lat, lng)</label>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control" id="lokasi_lat" placeholder="Latitude" readonly>
+                    <input type="text" class="form-control" id="lokasi_lng" placeholder="Longitude" readonly>
+                  </div>
+                </div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">Alamat Detail Lokasi Trouble</label>
+                <textarea class="form-control" id="alamat_detail" rows="2" placeholder="Alamat lengkap titik trouble (bisa beda dari alamat kantor customer)"></textarea>
+              </div>
+              <div class="form-text mb-2">Klik peta buat nandain titik lokasi trouble — otomatis ke-fill di atas.</div>
+              <div id="trouble-map" class="mb-3"></div>
+
+              <hr>
+              <h6 class="fw-bold mb-3"><i class="bi bi-calendar-range"></i> Jadwal Pengerjaan</h6>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Tanggal Mulai</label>
+                  <input type="date" class="form-control" id="tanggal_mulai">
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Target Tanggal Selesai</label>
+                  <input type="date" class="form-control" id="tanggal_selesai_target">
                 </div>
               </div>
 
+              <hr>
+              <h6 class="fw-bold mb-1"><i class="bi bi-cash-coin"></i> Rincian Biaya & Timing Pembayaran</h6>
+              <div class="form-text mb-2">Tambah baris per jenis biaya (jasa, transport, material, dll) beserta kapan dibayarnya.</div>
+              <div id="biaya-list"></div>
+              <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addBiayaRow()"><i class="bi bi-plus-lg"></i> Tambah Item Biaya</button>
+
+              <div class="row">
+                <div class="col-md-4 mb-3">
+                  <label class="form-label small text-muted">Total Jasa (otomatis)</label>
+                  <input type="text" class="form-control" id="total_jasa" readonly>
+                </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label small text-muted">Total Transport (otomatis)</label>
+                  <input type="text" class="form-control" id="total_transport" readonly>
+                </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label small text-muted">Total Material (otomatis)</label>
+                  <input type="text" class="form-control" id="total_material" readonly>
+                </div>
+              </div>
+
+              <div class="form-text mb-3">Timing bayar tiap item biaya sudah diatur di kolom "Sebelum/Sesudah" pada tabel di atas — item timing <b>Sebelum</b> wajib ditransfer Finance dulu (begitu atasan approve) sebelum order bisa di-assign ke teknisi; item timing <b>Sesudah</b> (mis. jasa) baru ditransfer Finance setelah pekerjaan selesai.</div>
+
+              <hr>
+              <h6 class="fw-bold mb-1"><i class="bi bi-bag-check"></i> Kebutuhan Barang yang Harus Dibeli Sebelum Assign</h6>
+              <div class="form-text mb-2">Mis. beli modem, sparepart khusus, dll (barang fisik, beda dari transfer uang di atas). Selama ada item di sini yang belum "Dibeli", tombol Assign Teknisi otomatis terkunci.</div>
+              <div id="kebutuhan-list"></div>
+              <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addKebutuhanRow()"><i class="bi bi-plus-lg"></i> Tambah Item Kebutuhan</button>
+
+              <hr>
+              <h6 class="fw-bold mb-1"><i class="bi bi-paperclip"></i> Lampiran Pendukung</h6>
+              <div class="form-text mb-2">Foto kondisi/trouble, PO, dokumen pendukung, dll. Boleh tambah lebih dari satu, masing-masing dikasih judul.</div>
+              <div id="lampiran-list"></div>
+              <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addLampiranRow()"><i class="bi bi-plus-lg"></i> Tambah Lampiran</button>
+
               <div class="d-flex gap-2 mt-4">
-                <a href="orders.html" class="btn btn-outline-secondary">Batal</a>
+                <a href="orders" class="btn btn-outline-secondary">Batal</a>
                 <button type="submit" class="btn btn-primary flex-grow-1" id="btn-submit">
                   <i class="bi bi-send"></i> Buat & Kirim Order
                 </button>
@@ -104,31 +143,158 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  if (session) { renderLayout({ active: 'orders', title: 'Buat Order Baru' }); loadCustomers(); }
+  let customers = [];
+  let map, marker;
+  let biayaSeq = 0;
+  let kebutuhanSeq = 0;
+  let lampiranSeq = 0;
+
+  if (session && session.role !== 'ADMIN') {
+    document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Membuat order hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
+  } else if (session) {
+    renderLayout({ active: 'orders', title: 'Buat Order Baru' });
+    loadCustomers();
+    initMap();
+    addBiayaRow();
+  }
 
   async function loadCustomers() {
     const sel = document.getElementById('customer_id');
     try {
       const d = await api('/api/customers');
-      if (!d.customers.length) {
+      customers = d.customers;
+      if (!customers.length) {
         sel.innerHTML = '<option value="">Belum ada customer — tambah dulu di Master Customer</option>';
         return;
       }
       sel.innerHTML = '<option value="">Pilih customer...</option>' +
-        d.customers.map(c => `<option value="${c.id}">${escapeHtml(c.nama_perusahaan)}</option>`).join('');
+        customers.map(c => `<option value="${c.id}">${escapeHtml(c.nama_perusahaan)}</option>`).join('');
     } catch (e) {
       sel.innerHTML = '<option value="">Gagal memuat customer</option>';
       toast(e.message, 'error');
     }
   }
 
-  function togglePreBayar() {
-    document.getElementById('pre-bayar-row').style.display =
-      document.getElementById('has_pre_bayar').checked ? 'flex' : 'none';
+  function onCustomerChange() {
+    const c = customers.find(x => x.id === Number(document.getElementById('customer_id').value));
+    if (c && c.latitude && c.longitude) {
+      setTroublePoint(Number(c.latitude), Number(c.longitude));
+    }
+  }
+
+  function initMap() {
+    map = L.map('trouble-map').setView([-6.4, 106.8], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+    map.on('click', (e) => setTroublePoint(e.latlng.lat, e.latlng.lng));
+    setTimeout(() => map.invalidateSize(), 300);
+    window.addEventListener('resize', () => map.invalidateSize());
+  }
+
+  function setTroublePoint(lat, lng) {
+    document.getElementById('lokasi_lat').value = lat.toFixed(7);
+    document.getElementById('lokasi_lng').value = lng.toFixed(7);
+    if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng]).addTo(map);
+    map.setView([lat, lng], 14);
+  }
+
+  /* ── Rincian biaya (jasa/transport/material/lainnya) ── */
+  function addBiayaRow(jenis = 'JASA') {
+    const id = 'biaya-' + (biayaSeq++);
+    const wrap = document.createElement('div');
+    wrap.className = 'item-row row g-2 align-items-center';
+    wrap.id = id;
+    wrap.innerHTML = `
+      <div class="col-md-3">
+        <select class="form-select form-select-sm biaya-jenis" onchange="recalcBiaya()">
+          <option value="JASA" ${jenis==='JASA'?'selected':''}>Jasa</option>
+          <option value="TRANSPORT" ${jenis==='TRANSPORT'?'selected':''}>Transport</option>
+          <option value="MATERIAL" ${jenis==='MATERIAL'?'selected':''}>Material</option>
+          <option value="LAINNYA" ${jenis==='LAINNYA'?'selected':''}>Lainnya</option>
+        </select>
+      </div>
+      <div class="col-md-4"><input class="form-control form-control-sm biaya-desk" placeholder="Deskripsi (opsional)"></div>
+      <div class="col-md-2"><input type="number" class="form-control form-control-sm biaya-jumlah" placeholder="Jumlah (Rp)" onchange="recalcBiaya()"></div>
+      <div class="col-md-2">
+        <select class="form-select form-select-sm biaya-timing">
+          <option value="SESUDAH">Sesudah</option>
+          <option value="SEBELUM">Sebelum</option>
+        </select>
+      </div>
+      <div class="col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('${id}').remove(); recalcBiaya();"><i class="bi bi-trash"></i></button></div>
+    `;
+    document.getElementById('biaya-list').appendChild(wrap);
+  }
+
+  function getBiayaRows() {
+    return [...document.querySelectorAll('#biaya-list .item-row')].map(row => ({
+      jenis: row.querySelector('.biaya-jenis').value,
+      deskripsi: row.querySelector('.biaya-desk').value.trim(),
+      jumlah: Number(row.querySelector('.biaya-jumlah').value) || 0,
+      timing_bayar: row.querySelector('.biaya-timing').value,
+    }));
+  }
+
+  function recalcBiaya() {
+    const rows = getBiayaRows();
+    const sum = (jenis) => rows.filter(r => r.jenis === jenis).reduce((a,b) => a + b.jumlah, 0);
+    document.getElementById('total_jasa').value = rupiah(sum('JASA'));
+    document.getElementById('total_transport').value = rupiah(sum('TRANSPORT'));
+    document.getElementById('total_material').value = rupiah(sum('MATERIAL') + sum('LAINNYA'));
+  }
+
+  /* ── Kebutuhan pra-assign (barang wajib dibeli sebelum assign) ── */
+  function addKebutuhanRow() {
+    const id = 'kbt-' + (kebutuhanSeq++);
+    const wrap = document.createElement('div');
+    wrap.className = 'item-row row g-2 align-items-center';
+    wrap.id = id;
+    wrap.innerHTML = `
+      <div class="col-md-5"><input class="form-control form-control-sm kbt-nama" placeholder="Nama item (mis. Modem TP-Link)"></div>
+      <div class="col-md-2"><input type="number" class="form-control form-control-sm kbt-qty" placeholder="Qty" value="1"></div>
+      <div class="col-md-3"><input type="number" class="form-control form-control-sm kbt-harga" placeholder="Estimasi harga (Rp)"></div>
+      <div class="col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('${id}').remove();"><i class="bi bi-trash"></i></button></div>
+    `;
+    document.getElementById('kebutuhan-list').appendChild(wrap);
+  }
+
+  function getKebutuhanRows() {
+    return [...document.querySelectorAll('#kebutuhan-list .item-row')]
+      .map(row => ({
+        nama_item: row.querySelector('.kbt-nama').value.trim(),
+        qty: Number(row.querySelector('.kbt-qty').value) || 1,
+        estimasi_harga: Number(row.querySelector('.kbt-harga').value) || null,
+      }))
+      .filter(r => r.nama_item);
+  }
+
+  /* ── Lampiran pendukung (judul + file, bisa lebih dari 1) ── */
+  function addLampiranRow() {
+    const id = 'lmp-' + (lampiranSeq++);
+    const wrap = document.createElement('div');
+    wrap.className = 'item-row row g-2 align-items-center';
+    wrap.id = id;
+    wrap.innerHTML = `
+      <div class="col-md-4"><input class="form-control form-control-sm lmp-judul" placeholder="Judul (mis. Foto Kondisi Awal)"></div>
+      <div class="col-md-7"><input type="file" class="form-control form-control-sm lmp-file" accept="image/*,application/pdf"></div>
+      <div class="col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('${id}').remove();"><i class="bi bi-trash"></i></button></div>
+    `;
+    document.getElementById('lampiran-list').appendChild(wrap);
+  }
+
+  function getLampiranRows() {
+    return [...document.querySelectorAll('#lampiran-list .item-row')]
+      .map(row => ({
+        judul: row.querySelector('.lmp-judul').value.trim(),
+        file: row.querySelector('.lmp-file').files[0] || null,
+      }))
+      .filter(r => r.file);
   }
 
   async function submitOrder(e) {
@@ -138,23 +304,39 @@
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Menyimpan...';
 
     try {
-      const payload = {
-        customer_id: Number(document.getElementById('customer_id').value),
-        category: document.getElementById('category').value,
-        priority: document.getElementById('priority').value,
-        description: document.getElementById('description').value.trim(),
-        has_pre_bayar: document.getElementById('has_pre_bayar').checked,
-        pre_bayar_amount: Number(document.getElementById('pre_bayar_amount').value) || null,
-        payment_timing: document.querySelector('input[name="payment_timing"]:checked').value,
-        biaya_jasa: Number(document.getElementById('biaya_jasa').value) || 0,
-        biaya_sparepart: Number(document.getElementById('biaya_sparepart').value) || 0,
-        created_by: session.id,
-      };
-      if (!payload.customer_id) throw new Error('Pilih customer dulu');
+      const rincianBiaya = getBiayaRows().filter(r => r.jumlah > 0);
+      const biayaJasa = rincianBiaya.filter(r => r.jenis === 'JASA').reduce((a,b)=>a+b.jumlah,0);
+      const biayaTransport = rincianBiaya.filter(r => r.jenis === 'TRANSPORT').reduce((a,b)=>a+b.jumlah,0);
+      const biayaSparepart = rincianBiaya.filter(r => r.jenis === 'MATERIAL' || r.jenis === 'LAINNYA').reduce((a,b)=>a+b.jumlah,0);
+      const customerId = document.getElementById('customer_id').value;
+      if (!customerId) throw new Error('Pilih customer dulu');
 
-      const d = await api('/api/orders', { method: 'POST', body: JSON.stringify(payload) });
+      const fd = new FormData();
+      fd.append('customer_id', customerId);
+      fd.append('category', document.getElementById('category').value);
+      fd.append('priority', document.getElementById('priority').value);
+      fd.append('description', document.getElementById('description').value.trim());
+      fd.append('wilayah', document.getElementById('wilayah').value.trim());
+      fd.append('alamat_detail', document.getElementById('alamat_detail').value.trim());
+      fd.append('lokasi_lat', document.getElementById('lokasi_lat').value || '');
+      fd.append('lokasi_lng', document.getElementById('lokasi_lng').value || '');
+      fd.append('tanggal_mulai', document.getElementById('tanggal_mulai').value || '');
+      fd.append('tanggal_selesai_target', document.getElementById('tanggal_selesai_target').value || '');
+      fd.append('biaya_jasa', biayaJasa);
+      fd.append('biaya_transport', biayaTransport);
+      fd.append('biaya_sparepart', biayaSparepart);
+      fd.append('rincian_biaya', JSON.stringify(rincianBiaya));
+      fd.append('kebutuhan_pra_assign', JSON.stringify(getKebutuhanRows()));
+
+      const lampiran = getLampiranRows();
+      lampiran.forEach(l => {
+        fd.append('files', l.file);
+        fd.append('judul', l.judul || '');
+      });
+
+      const d = await apiUpload('/api/orders', fd);
       toast(`Order ${d.orderNo} berhasil dibuat`, 'success');
-      setTimeout(() => location.href = `order-detail.html?id=${d.orderId}`, 600);
+      setTimeout(() => location.href = `order-detail?id=${d.orderId}`, 600);
     } catch (err) {
       toast(err.message, 'error');
       btn.disabled = false;

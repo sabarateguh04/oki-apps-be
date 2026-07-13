@@ -35,9 +35,12 @@
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  const canApprove = session && ['ADMIN', 'ATASAN'].includes(session.role);
-
-  if (session) { renderLayout({ active: 'approval', title: 'Approval Order' }); loadPending(); }
+  if (session && session.role !== 'ATASAN') {
+    document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Halaman ini hanya untuk role <b>Atasan</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
+  } else if (session) {
+    renderLayout({ active: 'approval', title: 'Approval Order' });
+    loadPending();
+  }
 
   async function loadPending() {
     const body = document.getElementById('approval-body');
@@ -50,16 +53,14 @@
       }
       body.innerHTML = d.orders.map(o => `
         <tr>
-          <td><a href="order-detail.html?id=${o.id}"><b>${o.order_no}</b></a></td>
+          <td><a href="order-detail?id=${o.id}"><b>${o.order_no}</b></a></td>
           <td>${escapeHtml(o.nama_perusahaan)}</td>
           <td>${o.category}</td>
           <td>${priorityBadge(o.priority)}</td>
           <td class="text-muted small">${fmtDate(o.created_at)}</td>
           <td class="text-end">
-            ${canApprove ? `
-              <button class="btn btn-sm btn-success" onclick="approve(${o.id})"><i class="bi bi-check-lg"></i></button>
-              <button class="btn btn-sm btn-outline-danger" onclick="reject(${o.id})"><i class="bi bi-x-lg"></i></button>
-            ` : `<span class="text-muted small">Hanya Atasan/Admin</span>`}
+            <button class="btn btn-sm btn-success" onclick="approve(${o.id})"><i class="bi bi-check-lg"></i></button>
+            <button class="btn btn-sm btn-outline-danger" onclick="reject(${o.id})"><i class="bi bi-x-lg"></i></button>
           </td>
         </tr>`).join('');
     } catch (e) {
@@ -70,7 +71,7 @@
   async function approve(id) {
     if (!confirm('Setujui order ini?')) return;
     try {
-      await api(`/api/orders/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved_by: session.id }) });
+      await api(`/api/orders/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
       toast('Order disetujui', 'success');
       loadPending();
     } catch (e) { toast(e.message, 'error'); }
@@ -80,7 +81,7 @@
     const note = prompt('Alasan penolakan (opsional):');
     if (note === null) return;
     try {
-      await api(`/api/orders/${id}/reject`, { method: 'POST', body: JSON.stringify({ rejected_by: session.id, note }) });
+      await api(`/api/orders/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) });
       toast('Order ditolak', 'success');
       loadPending();
     } catch (e) { toast(e.message, 'error'); }

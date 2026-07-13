@@ -6,7 +6,19 @@
 <title>Detail Order — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .file-chip{ display:inline-flex; align-items:center; gap:6px; background:#f1f3f6; border-radius:8px; padding:4px 10px; margin:2px 4px 2px 0; font-size:12.5px; }
+  .tech-chip{ display:flex; align-items:center; gap:8px; background:#f8f9fb; border:1px solid #e9ecef; border-radius:10px; padding:6px 10px; margin:0 0 6px 0; }
+  .tech-chip .av{ width:26px;height:26px;border-radius:50%;background:#0d6efd;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0; }
+  .tech-chip.rejected{ opacity:.55; }
+  .tech-chip.rejected .av{ background:#dc3545; }
+  .tech-chip.accepted .av{ background:#198754; }
+  .biaya-row{ border:1px solid #eee; border-radius:10px; padding:10px; margin-bottom:8px; }
+  .work-proof-item{ display:inline-block; margin:4px 6px 4px 0; }
+  .work-proof-item img{ width:110px; height:110px; object-fit:cover; border-radius:10px; border:1px solid #e9ecef; }
+</style>
 </head>
 <body>
 
@@ -18,12 +30,16 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
   const orderId = new URLSearchParams(location.search).get('id');
   let currentOrder = null;
+  let locMap = null;
+  const CATEGORY_LABEL = { PREVENTIVE:'Preventive', CORRECTIVE:'Corrective', INSTALLATION:'Installation', INSPECTION:'Inspection' };
+  const JENIS_LABEL = { JASA:'Jasa', TRANSPORT:'Transport', MATERIAL:'Material', LAINNYA:'Lainnya' };
 
   if (session) {
     renderLayout({ active: 'orders', title: 'Detail Order' });
@@ -33,8 +49,6 @@
       loadOrder();
     }
   }
-
-  const CATEGORY_LABEL = { PREVENTIVE:'Preventive', CORRECTIVE:'Corrective', INSTALLATION:'Installation', INSPECTION:'Inspection' };
 
   async function loadOrder() {
     try {
@@ -46,14 +60,96 @@
     }
   }
 
+  function fileChips(files) {
+    if (!files || !files.length) return '<span class="text-muted small">Belum ada bukti diupload</span>';
+    return files.map(f => `<a href="${f.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> ${f.judul ? escapeHtml(f.judul) : 'Lihat file'}</a>`).join('');
+  }
+
+  function workProofGallery(files) {
+    if (!files || !files.length) return '<p class="text-muted small mb-0"><i class="bi bi-camera"></i> Teknisi belum upload bukti hasil pekerjaan.</p>';
+    return files.map(f => {
+      const isImage = /\.(jpe?g|png|webp)$/i.test(f.file_url);
+      return `<a href="${f.file_url}" target="_blank" class="work-proof-item" title="${f.judul ? escapeHtml(f.judul) : 'Bukti pekerjaan'}">
+        ${isImage ? `<img src="${f.file_url}">` : `<span class="file-chip"><i class="bi bi-file-earmark-pdf"></i> ${f.judul ? escapeHtml(f.judul) : 'Lihat file'}</span>`}
+      </a>`;
+    }).join('');
+  }
+
+  /* Rekening teknisi yang PALING relevan buat ditransfer jasa-nya —
+     prioritas: yang statusnya ASSIGNED, kalau belum ada pakai yang ACCEPTED. */
+  function rekeningTujuanTransfer(o) {
+    const pool = [...(o.technicians_assigned || []), ...(o.technicians_accepted || [])];
+    const t = pool[0];
+    if (!t) return null;
+    if (!t.nama_bank || !t.no_rekening) return { nama: t.nama, missing: true };
+    return { nama: t.nama, bank: t.nama_bank, rekening: t.no_rekening, atasNama: t.nama_rekening || t.nama };
+  }
+
+  /* Render 1 baris "Rincian Biaya" — dipakai baik saat render awal MAUPUN
+     saat refresh 1 baris aja (biar file yg lagi dipilih di baris LAIN gak
+     ke-reset waktu 1 baris berhasil disubmit). */
+  function renderBiayaRow(o, b, canFinance) {
+    const payableNow = o.approval_status === 'APPROVED' && (b.timing_bayar === 'SEBELUM' || ['DONE','CLOSED'].includes(o.status));
+    // Jasa, Transport, dan Lainnya itu duitnya ke KANTONG TEKNISI (jadi
+    // perlu rekening pribadinya) — beda sama Material yang biasanya
+    // dibayar ke toko/supplier, bukan ke teknisi.
+    const rekening = b.jenis !== 'MATERIAL' ? rekeningTujuanTransfer(o) : null;
+    return `
+      <div class="biaya-row" id="biaya-row-${b.id}">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            <b>${JENIS_LABEL[b.jenis] || b.jenis}</b> ${b.deskripsi ? '— ' + escapeHtml(b.deskripsi) : ''}
+            <div class="text-muted small">${rupiah(b.jumlah)} · Timing: <span class="badge ${b.timing_bayar === 'SEBELUM' ? 'badge-priority-HIGH' : 'badge-status-DONE'}">${b.timing_bayar}</span></div>
+          </div>
+          <div>${b.status === 'DONE' ? '<span class="badge badge-status-DONE">Sudah Ditransfer</span>' : '<span class="badge badge-approval-PENDING">Belum Ditransfer</span>'}</div>
+        </div>
+        ${rekening ? `
+          <div class="alert alert-light border py-2 px-3 mt-2 mb-0" style="font-size:12.5px;">
+            <i class="bi bi-bank"></i> <b>Rekening teknisi tujuan transfer${b.jenis !== 'JASA' ? ' (' + (JENIS_LABEL[b.jenis]||b.jenis).toLowerCase() + ')' : ''}:</b>
+            ${rekening.missing
+              ? `${escapeHtml(rekening.nama)} — <span class="text-danger">rekening belum dilengkapi di Master Teknisi</span>`
+              : `${escapeHtml(rekening.bank)} · <b>${escapeHtml(rekening.rekening)}</b> a.n ${escapeHtml(rekening.atasNama)}`}
+          </div>` : (b.jenis === 'MATERIAL' ? `<div class="form-text mt-2"><i class="bi bi-shop"></i> Biasanya ditransfer ke toko/supplier, bukan ke rekening teknisi — cek lampiran/keterangan buat detail tujuannya.</div>` : '')}
+        <div class="mt-2">${fileChips(b.bukti_files)}</div>
+        ${b.status !== 'DONE' && canFinance ? (
+          payableNow ? `
+            <div class="mt-2">
+              <input type="file" multiple class="form-control form-control-sm mb-2" id="biaya-file-${b.id}" accept="image/*,application/pdf">
+              <button class="btn btn-sm btn-success w-100" onclick="bayarBiaya(${b.id})">Tandai Sudah Ditransfer</button>
+            </div>
+          ` : `<div class="form-text mt-1">${o.approval_status !== 'APPROVED' ? 'Menunggu approval atasan dulu.' : 'Baru bisa ditransfer setelah pekerjaan berstatus DONE.'}</div>`
+        ) : ''}
+      </div>`;
+  }
+
+  /* Sama seperti di atas, buat 1 baris "Kebutuhan Barang". */
+  function renderKebutuhanRow(k, canFinance) {
+    return `<tr id="kbt-row-${k.id}">
+      <td>${escapeHtml(k.nama_item)}</td>
+      <td>${k.qty}</td>
+      <td>${k.estimasi_harga ? rupiah(k.estimasi_harga) : '-'}</td>
+      <td>${k.status === 'DIBELI' ? '<span class="badge badge-status-DONE">Dibeli</span>' : '<span class="badge badge-approval-PENDING">Pending</span>'}</td>
+      <td>${fileChips(k.bukti_files)}</td>
+      ${canFinance ? `<td>${k.status === 'PENDING' ? `
+        <input type="file" multiple class="form-control form-control-sm mb-1" id="kbt-file-${k.id}" accept="image/*,application/pdf" style="max-width:180px;">
+        <button class="btn btn-sm btn-outline-success" onclick="markKebutuhanDibeli(${k.id})">Tandai Dibeli</button>
+      ` : ''}</td>` : ''}
+    </tr>`;
+  }
+
   function render(o, timeline) {
-    const canApprove = ['ADMIN','ATASAN'].includes(session.role) && o.approval_status === 'PENDING';
-    const canFinance  = ['ADMIN','FINANCE'].includes(session.role);
-    const elig = o.assign_eligibility;
+    const canFinance  = session.role === 'FINANCE';
+    const canAssign   = session.role === 'ADMIN';
+    const kebutuhan = o.kebutuhan_pra_assign || [];
+    const biaya = o.rincian_biaya || [];
+
+    const mapLat = o.lokasi_lat || o.customer_lat;
+    const mapLng = o.lokasi_lng || o.customer_lng;
+    const mapIsFallback = !o.lokasi_lat && o.customer_lat;
 
     document.getElementById('page-body').innerHTML = `
       <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
-        <a href="orders.html" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+        <a href="orders" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
         <h4 class="mb-0 flex-grow-1">${o.order_no}</h4>
         ${statusBadge(o.status)} ${priorityBadge(o.priority)} ${approvalBadge(o.approval_status)}
       </div>
@@ -66,40 +162,55 @@
             <div class="card-body">
               <div class="row mb-2"><div class="col-4 text-muted small">Customer</div><div class="col-8 fw-semibold">${escapeHtml(o.nama_perusahaan)}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">PIC</div><div class="col-8">${escapeHtml(o.pic_nama || '-')} ${o.pic_hp ? '· ' + escapeHtml(o.pic_hp) : ''}</div></div>
-              <div class="row mb-2"><div class="col-4 text-muted small">Alamat</div><div class="col-8">${escapeHtml(o.customer_alamat || '-')}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Kategori</div><div class="col-8">${CATEGORY_LABEL[o.category] || o.category}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Deskripsi</div><div class="col-8">${escapeHtml(o.description || '-')}</div></div>
-              <div class="row mb-2"><div class="col-4 text-muted small">Dibuat</div><div class="col-8">${fmtDate(o.created_at)}</div></div>
-              <div class="row"><div class="col-4 text-muted small">Teknisi</div><div class="col-8">${o.technician_nama ? escapeHtml(o.technician_nama) + (o.technician_hp ? ' · '+escapeHtml(o.technician_hp) : '') : '<span class="text-muted">Belum ditugaskan</span>'}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Wilayah</div><div class="col-8">${escapeHtml(o.wilayah || '-')}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Alamat Lokasi Trouble</div><div class="col-8">${escapeHtml(o.alamat_detail || o.customer_alamat || '-')}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Jadwal Pengerjaan</div><div class="col-8">${o.tanggal_mulai ? fmtDateOnly(o.tanggal_mulai) : '-'} s/d ${o.tanggal_selesai_target ? fmtDateOnly(o.tanggal_selesai_target) : '-'}</div></div>
+              <div class="row"><div class="col-4 text-muted small">Dibuat</div><div class="col-8">${fmtDate(o.created_at)}</div></div>
             </div>
           </div>
 
           <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-cash-coin"></i> Biaya & Pembayaran</div>
-            <div class="card-body">
-              <div class="row mb-2"><div class="col-6 text-muted small">Biaya Jasa</div><div class="col-6 text-end fw-semibold">${rupiah(o.biaya_jasa)}</div></div>
-              <div class="row mb-2"><div class="col-6 text-muted small">Biaya Sparepart</div><div class="col-6 text-end fw-semibold">${rupiah(o.biaya_sparepart)}</div></div>
-              <hr class="my-2">
-              <div class="row mb-3"><div class="col-6 fw-bold">Total</div><div class="col-6 text-end fw-bold text-primary">${rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart))}</div></div>
-
-              ${o.has_pre_bayar ? `
-              <div class="d-flex justify-content-between align-items-center border rounded-3 p-2 mb-2">
-                <div><i class="bi bi-box-seam"></i> Pre-Bayar Material (${rupiah(o.pre_bayar_amount)})</div>
-                ${o.pre_bayar_status === 'DONE'
-                  ? '<span class="badge badge-status-DONE">Selesai</span>'
-                  : (canFinance ? `<button class="btn btn-sm btn-success" onclick="markPreBayarDone()">Tandai Selesai</button>` : '<span class="badge badge-approval-PENDING">Menunggu</span>')}
-              </div>` : ''}
-
-              <div class="d-flex justify-content-between align-items-center border rounded-3 p-2">
-                <div><i class="bi bi-bank"></i> Jasa Teknisi (bayar ${o.payment_timing === 'SEBELUM' ? 'SEBELUM' : 'SESUDAH'} eksekusi)</div>
-                ${o.payment_timing !== 'SEBELUM'
-                  ? '<span class="text-muted small">Tidak perlu dicek di muka</span>'
-                  : (o.jasa_teknisi_transfer_status === 'DONE'
-                      ? '<span class="badge badge-status-DONE">Selesai</span>'
-                      : (canFinance ? `<button class="btn btn-sm btn-success" onclick="markJasaTeknisiDone()">Tandai TF Selesai</button>` : '<span class="badge badge-approval-PENDING">Menunggu</span>'))}
-              </div>
+            <div class="card-header"><i class="bi bi-geo-alt"></i> Titik Lokasi ${mapIsFallback ? '(alamat customer, belum ada titik trouble spesifik)' : 'Trouble'}</div>
+            <div class="card-body p-0">
+              ${mapLat && mapLng
+                ? '<div id="loc-map" style="height:240px;border-radius:0 0 16px 16px;"></div>'
+                : '<div class="empty-state py-4"><i class="bi bi-geo"></i><p>Belum ada titik lokasi diset untuk order maupun customer ini</p></div>'}
             </div>
           </div>
+
+          ${o.lampiran && o.lampiran.length ? `
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-paperclip"></i> Lampiran Pendukung</div>
+            <div class="card-body">${fileChips(o.lampiran)}</div>
+          </div>` : ''}
+
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-camera"></i> Hasil Pekerjaan Teknisi</div>
+            <div class="card-body">${workProofGallery(o.bukti_pekerjaan)}</div>
+          </div>
+
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-cash-coin"></i> Rincian Biaya & Status Transfer</div>
+            <div class="card-body" id="biaya-section-body">
+              ${biaya.length ? biaya.map(b => renderBiayaRow(o, b, canFinance)).join('') : '<p class="text-muted small">Belum ada rincian biaya.</p>'}
+              <div class="row mt-2"><div class="col-6 fw-bold">Total</div><div class="col-6 text-end fw-bold text-primary">${rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart)+Number(o.biaya_transport))}</div></div>
+            </div>
+          </div>
+
+          ${kebutuhan.length ? `
+          <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-bag-check"></i> Kebutuhan Barang yang Harus Dibeli Sebelum Assign</div>
+            <div class="card-body p-0">
+              <table class="table table-sm mb-0">
+                <thead><tr><th>Item</th><th>Qty</th><th>Estimasi Harga</th><th>Status</th><th>Bukti</th>${canFinance ? '<th></th>' : ''}</tr></thead>
+                <tbody id="kebutuhan-section-body">
+                  ${kebutuhan.map(k => renderKebutuhanRow(k, canFinance)).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>` : ''}
 
           <div class="card">
             <div class="card-header"><i class="bi bi-clock-history"></i> Timeline Pekerjaan</div>
@@ -118,63 +229,164 @@
 
         </div>
 
-        <div class="col-lg-4">
-
-          ${canApprove ? `
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-check2-square"></i> Approval Atasan</div>
-            <div class="card-body d-grid gap-2">
-              <button class="btn btn-success" onclick="approveOrder()"><i class="bi bi-check-lg"></i> Setujui Order</button>
-              <button class="btn btn-outline-danger" onclick="rejectOrder()"><i class="bi bi-x-lg"></i> Tolak Order</button>
-            </div>
-          </div>` : ''}
-
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-person-check"></i> Assign Teknisi</div>
-            <div class="card-body">
-              ${o.technician_id ? `
-                <div class="d-flex align-items-center gap-2">
-                  <div class="av bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-weight:700;">${(o.technician_nama||'?').slice(0,1).toUpperCase()}</div>
-                  <div><b>${escapeHtml(o.technician_nama)}</b><br><span class="text-muted small">${escapeHtml(o.technician_hp||'')}</span></div>
-                </div>
-              ` : elig.eligible ? `
-                <select class="form-select mb-2" id="assign-technician-select"><option value="">Memuat teknisi...</option></select>
-                <button class="btn btn-primary w-100" onclick="assignTechnician()"><i class="bi bi-send-check"></i> Assign Teknisi</button>
-              ` : `
-                <div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tombol Assign disembunyikan</b><br>${elig.reason}</div></div>
-              `}
-            </div>
-          </div>
-
-          ${['ASSIGNED','ON_THE_WAY','IN_PROGRESS'].includes(o.status) ? `
-          <div class="card">
-            <div class="card-header"><i class="bi bi-arrow-repeat"></i> Update Status Pekerjaan</div>
-            <div class="card-body d-grid gap-2">
-              ${o.status === 'ASSIGNED' ? `<button class="btn btn-warning" onclick="updateStatus('ON_THE_WAY')"><i class="bi bi-signpost"></i> Tandai Menuju Lokasi</button>` : ''}
-              ${o.status === 'ON_THE_WAY' ? `<button class="btn btn-orange" style="background:#fd7e14;color:#fff;" onclick="updateStatus('IN_PROGRESS')"><i class="bi bi-tools"></i> Tandai Dikerjakan</button>` : ''}
-              ${o.status === 'IN_PROGRESS' ? `<button class="btn btn-success" onclick="updateStatus('DONE')"><i class="bi bi-check-lg"></i> Tandai Selesai</button>` : ''}
-              <button class="btn btn-outline-danger btn-sm" onclick="updateStatus('CANCELLED')"><i class="bi bi-slash-circle"></i> Batalkan Order</button>
-            </div>
-          </div>` : ''}
-
-        </div>
+        <div class="col-lg-4" id="side-panel">${renderSidePanelHtml(o)}</div>
       </div>
     `;
 
-    if (o.technician_id === null && elig.eligible) loadTechnicianOptions();
+    if (!(o.technicians_assigned||[]).length && canAssign) loadTechnicianOptions();
+    if (mapLat && mapLng) initLocMap(Number(mapLat), Number(mapLng));
+  }
+
+  /* Panel kanan (approval/teknisi/assign/close) — dipisah jadi fungsi
+     sendiri biar bisa di-refresh TANPA nyentuh baris biaya/kebutuhan di
+     panel kiri (lihat refreshRowOnly / refreshSidePanel). */
+  function renderSidePanelHtml(o) {
+    const canApprove = session.role === 'ATASAN' && o.approval_status === 'PENDING';
+    const canFinance  = session.role === 'FINANCE';
+    const canAssign   = session.role === 'ADMIN';
+    const elig = o.assign_eligibility;
+    const planned = o.technicians_planned || [];
+    const accepted = o.technicians_accepted || [];
+    const rejected = o.technicians_rejected || [];
+    const assigned = o.technicians_assigned || [];
+    const hasAnyAssigned = assigned.length > 0;
+
+    const pendingBiaya = (o.rincian_biaya || []).filter(b => b.status === 'PENDING').length;
+    const closeEligible = o.status === 'DONE' && pendingBiaya === 0;
+
+    return `
+      ${canApprove ? `
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-check2-square"></i> Approval Atasan</div>
+        <div class="card-body d-grid gap-2">
+          <button class="btn btn-success" onclick="approveOrder()"><i class="bi bi-check-lg"></i> Setujui Order</button>
+          <button class="btn btn-outline-danger" onclick="rejectOrder()"><i class="bi bi-x-lg"></i> Tolak Order</button>
+        </div>
+      </div>` : ''}
+
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-person-check"></i> Teknisi</div>
+        <div class="card-body">
+
+          ${assigned.length ? `
+            <div class="small text-muted mb-1">Sudah di-ASSIGN (final, sedang/akan mengerjakan):</div>
+            ${assigned.map(t => `
+              <div class="tech-chip accepted"><div class="av">${(t.nama||'?').slice(0,1).toUpperCase()}</div>
+                <div class="flex-grow-1"><b>${escapeHtml(t.nama)}</b><br><span class="text-muted" style="font-size:11px;">${escapeHtml(t.no_hp||'')}</span>
+                ${(canFinance || canAssign) ? `<br><span class="text-muted" style="font-size:11px;"><i class="bi bi-bank"></i> ${t.nama_bank ? escapeHtml(t.nama_bank)+' · '+escapeHtml(t.no_rekening||'-')+' a.n '+escapeHtml(t.nama_rekening||t.nama) : 'Rekening belum dilengkapi di Master Teknisi'}</span>` : ''}
+                </div>
+              </div>`).join('')}
+          ` : ''}
+
+          ${accepted.length ? `
+            <div class="small text-muted mb-1 mt-2">Menerima tawaran (Finance sudah bisa siapkan transfer ke rekening ini):</div>
+            ${accepted.map(t => `
+              <div class="tech-chip accepted">
+                <div class="av">${(t.nama||'?').slice(0,1).toUpperCase()}</div>
+                <div class="flex-grow-1">
+                  <b>${escapeHtml(t.nama)}</b>
+                  ${(canFinance || canAssign) ? `<br><span class="text-muted" style="font-size:11px;">${t.nama_bank ? escapeHtml(t.nama_bank)+' · '+escapeHtml(t.no_rekening||'-')+' a.n '+escapeHtml(t.nama_rekening||t.nama) : 'Rekening belum dilengkapi di Master Teknisi'}</span>` : ''}
+                </div>
+              </div>`).join('')}
+          ` : ''}
+
+          ${planned.length ? `
+            <div class="small text-muted mb-1 mt-2">Menunggu respon teknisi:</div>
+            ${planned.map(t => `
+              <div class="tech-chip">
+                <div class="av" style="background:#adb5bd;">${(t.nama||'?').slice(0,1).toUpperCase()}</div>
+                <div class="flex-grow-1"><b>${escapeHtml(t.nama)}</b> <span class="badge badge-approval-PENDING">Belum respon</span></div>
+                ${canAssign ? `<button class="btn btn-sm btn-link text-danger p-0" onclick="unplanTechnician(${t.id})" title="Batalkan tawaran"><i class="bi bi-x-circle"></i></button>` : ''}
+              </div>`).join('')}
+          ` : ''}
+
+          ${rejected.length ? `
+            <div class="small text-muted mb-1 mt-2">Menolak tawaran (riwayat):</div>
+            ${rejected.map(t => `
+              <div class="tech-chip rejected">
+                <div class="av">${(t.nama||'?').slice(0,1).toUpperCase()}</div>
+                <div class="flex-grow-1"><b>${escapeHtml(t.nama)}</b>${t.response_note ? ` — <span class="small">${escapeHtml(t.response_note)}</span>` : ''}</div>
+              </div>`).join('')}
+          ` : ''}
+
+          ${!hasAnyAssigned && canAssign ? `
+            <div class="small text-muted mb-1 mt-2">Tawarkan tugas ke teknisi lain:</div>
+            <div class="d-flex gap-2 mb-2">
+              <select class="form-select form-select-sm" id="plan-technician-select"><option value="">Memuat teknisi...</option></select>
+              <button class="btn btn-sm btn-outline-primary" onclick="planTechnician()"><i class="bi bi-send"></i></button>
+            </div>
+          ` : ''}
+
+          ${!hasAnyAssigned ? (
+            !canAssign ? `
+              <div class="block-message mt-2"><i class="bi bi-lock-fill"></i> <div><b>Hanya Admin yang bisa konfirmasi assign</b></div></div>
+            ` : elig.eligible ? `
+              <button class="btn btn-primary w-100 mt-2" onclick="confirmAssign()"><i class="bi bi-send-check"></i> Konfirmasi &amp; Assign Sekarang</button>
+            ` : `
+              <div class="block-message mt-2"><i class="bi bi-lock-fill"></i> <div><b>Konfirmasi Assign masih terkunci</b><br>${elig.reason}</div></div>
+            `
+          ) : ''}
+        </div>
+      </div>
+
+      ${canAssign ? `
+      <div class="card">
+        <div class="card-header"><i class="bi bi-gear"></i> Aksi Admin</div>
+        <div class="card-body d-grid gap-2">
+          ${o.status === 'DONE' ? (
+            closeEligible
+              ? `<button class="btn btn-primary" onclick="closeTicket()"><i class="bi bi-check-circle"></i> Tutup Tiket (Close)</button>`
+              : `<div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tutup Tiket masih terkunci</b><br>Masih ada ${pendingBiaya} biaya yang belum ditransfer Finance.</div></div>`
+          ) : ''}
+          ${!['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status) ? `<button class="btn btn-outline-danger btn-sm" onclick="updateStatus('CANCELLED')"><i class="bi bi-slash-circle"></i> Batalkan Order</button>` : ''}
+          ${['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status) && o.status !== 'DONE' ? `<div class="text-muted small text-center">Tidak ada aksi lagi untuk order berstatus ${o.status}.</div>` : ''}
+          <div class="form-text">Update progres pekerjaan (menuju lokasi / dikerjakan / selesai) dilakukan oleh teknisi lewat halaman mereka sendiri.</div>
+        </div>
+      </div>` : ''}
+    `;
+  }
+
+  /* Refresh cuma panel kanan (dipanggil setelah 1 baris biaya/kebutuhan
+     berhasil disubmit) — TIDAK menyentuh baris-baris lain di panel kiri. */
+  function refreshSidePanel(o) {
+    document.getElementById('side-panel').innerHTML = renderSidePanelHtml(o);
+    if (!(o.technicians_assigned||[]).length && session.role === 'ADMIN') loadTechnicianOptions();
+  }
+
+  function initLocMap(lat, lng) {
+    setTimeout(() => {
+      locMap = L.map('loc-map').setView([lat, lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(locMap);
+      L.marker([lat, lng]).addTo(locMap);
+      setTimeout(() => locMap.invalidateSize(), 200);
+      window.addEventListener('resize', () => locMap && locMap.invalidateSize());
+    }, 50);
+  }
+
+  function fmtDateOnly(d) {
+    if (!d) return '-';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
   }
 
   async function loadTechnicianOptions() {
-    const sel = document.getElementById('assign-technician-select');
+    const sel = document.getElementById('plan-technician-select');
     if (!sel) return;
     try {
-      const d = await api('/api/technicians?status=READY');
-      if (!d.technicians.length) {
-        sel.innerHTML = '<option value="">Tidak ada teknisi READY saat ini</option>';
+      const d = await api('/api/technicians');
+      const already = new Set([
+        ...(currentOrder.technicians_planned||[]),
+        ...(currentOrder.technicians_accepted||[]),
+        ...(currentOrder.technicians_assigned||[]),
+      ].map(t => t.id));
+      const available = d.technicians.filter(t => !already.has(t.id));
+      if (!available.length) {
+        sel.innerHTML = '<option value="">Semua teknisi aktif sudah ditawarkan</option>';
         return;
       }
       sel.innerHTML = '<option value="">Pilih teknisi...</option>' +
-        d.technicians.map(t => `<option value="${t.id}">${escapeHtml(t.nama)}${t.skill ? ' — '+escapeHtml(t.skill) : ''}</option>`).join('');
+        available.map(t => `<option value="${t.id}">${escapeHtml(t.nama)}${t.spesialisasi || t.skill ? ' — '+escapeHtml(t.spesialisasi || t.skill) : ''} (${t.status})</option>`).join('');
     } catch (e) {
       sel.innerHTML = '<option value="">Gagal memuat teknisi</option>';
     }
@@ -183,7 +395,7 @@
   async function approveOrder() {
     if (!confirm('Setujui order ini?')) return;
     try {
-      await api(`/api/orders/${orderId}/approve`, { method: 'POST', body: JSON.stringify({ approved_by: session.id }) });
+      await api(`/api/orders/${orderId}/approve`, { method: 'POST', body: JSON.stringify({}) });
       toast('Order disetujui', 'success');
       loadOrder();
     } catch (e) { toast(e.message, 'error'); }
@@ -193,37 +405,95 @@
     const note = prompt('Alasan penolakan (opsional):');
     if (note === null) return;
     try {
-      await api(`/api/orders/${orderId}/reject`, { method: 'POST', body: JSON.stringify({ rejected_by: session.id, note }) });
+      await api(`/api/orders/${orderId}/reject`, { method: 'POST', body: JSON.stringify({ note }) });
       toast('Order ditolak', 'success');
       loadOrder();
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  async function markPreBayarDone() {
+  function filesToFormData(inputId, keteranganValue) {
+    const fd = new FormData();
+    const el = document.getElementById(inputId);
+    if (el && el.files) [...el.files].forEach(f => fd.append('files', f));
+    if (keteranganValue !== undefined) fd.append('keterangan', keteranganValue);
+    return fd;
+  }
+
+  /* Ambil ulang 1 order tapi CUMA update baris yang relevan di DOM —
+     sengaja TIDAK render() ulang seluruh halaman, karena itu bakal
+     ngosongin file yang lagi dipilih user di baris LAIN yang belum
+     sempat disubmit (ini akar bug "bukti gak ke-save" sebelumnya). */
+  async function refreshRowOnly(kind, itemId) {
+    const d = await api(`/api/orders/${orderId}`);
+    currentOrder = d.order;
+    const canFinance = session.role === 'FINANCE';
+    if (kind === 'biaya') {
+      const b = (d.order.rincian_biaya || []).find(x => x.id === itemId);
+      const el = document.getElementById(`biaya-row-${itemId}`);
+      if (b && el) el.outerHTML = renderBiayaRow(d.order, b, canFinance);
+    } else if (kind === 'kebutuhan') {
+      const k = (d.order.kebutuhan_pra_assign || []).find(x => x.id === itemId);
+      const el = document.getElementById(`kbt-row-${itemId}`);
+      if (k && el) el.outerHTML = renderKebutuhanRow(k, canFinance);
+    }
+    // Panel kanan (status Assign/Close dll) tetap perlu ke-update karena
+    // eligibility bisa berubah begitu 1 item lunas — tapi ini gak nyentuh
+    // file input di baris biaya/kebutuhan lainnya, jadi aman.
+    refreshSidePanel(d.order);
+  }
+
+  async function markKebutuhanDibeli(kebutuhanId) {
+    const input = document.getElementById(`kbt-file-${kebutuhanId}`);
+    if (!input || !input.files || !input.files.length) {
+      toast('Pilih file bukti dulu untuk baris ini', 'error');
+      return;
+    }
     try {
-      await api(`/api/orders/${orderId}/pre-bayar-done`, { method: 'POST', body: JSON.stringify({ marked_by: session.id }) });
-      toast('Pre-bayar ditandai selesai', 'success');
-      loadOrder();
+      await apiUpload(`/api/orders/${orderId}/kebutuhan/${kebutuhanId}/dibeli`, filesToFormData(`kbt-file-${kebutuhanId}`));
+      toast('Kebutuhan ditandai sudah dibeli', 'success');
+      refreshRowOnly('kebutuhan', kebutuhanId);
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  async function markJasaTeknisiDone() {
+  async function bayarBiaya(biayaId) {
+    const input = document.getElementById(`biaya-file-${biayaId}`);
+    if (!input || !input.files || !input.files.length) {
+      toast('Pilih file bukti transfer dulu untuk baris ini', 'error');
+      return;
+    }
     try {
-      await api(`/api/orders/${orderId}/jasa-teknisi-done`, { method: 'POST', body: JSON.stringify({ marked_by: session.id }) });
-      toast('Transfer jasa teknisi ditandai selesai', 'success');
-      loadOrder();
+      await apiUpload(`/api/orders/${orderId}/biaya/${biayaId}/bayar`, filesToFormData(`biaya-file-${biayaId}`));
+      toast('Biaya ditandai sudah ditransfer', 'success');
+      refreshRowOnly('biaya', biayaId);
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  async function assignTechnician() {
-    const sel = document.getElementById('assign-technician-select');
+  async function planTechnician() {
+    const sel = document.getElementById('plan-technician-select');
     const technicianId = Number(sel.value);
     if (!technicianId) { toast('Pilih teknisi dulu', 'error'); return; }
     try {
-      const d = await api(`/api/orders/${orderId}/assign`, {
-        method: 'POST',
-        body: JSON.stringify({ technician_id: technicianId, assigned_by: session.id }),
-      });
+      await api(`/api/orders/${orderId}/plan-technician`, { method: 'POST', body: JSON.stringify({ technician_id: technicianId }) });
+      toast('Tugas ditawarkan, menunggu respon teknisi', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function unplanTechnician(technicianId) {
+    if (!confirm('Batalkan tawaran tugas ke teknisi ini?')) return;
+    try {
+      await api(`/api/orders/${orderId}/plan-technician/${technicianId}`, { method: 'DELETE' });
+      toast('Tawaran dibatalkan', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function confirmAssign() {
+    const acceptedIds = (currentOrder.technicians_accepted || []).map(t => t.id);
+    if (!acceptedIds.length) { toast('Belum ada teknisi yang menerima tawaran', 'error'); return; }
+    if (!confirm(`Assign order ini ke ${acceptedIds.length} teknisi yang sudah menerima tawaran?`)) return;
+    try {
+      const d = await api(`/api/orders/${orderId}/assign`, { method: 'POST', body: JSON.stringify({ technician_ids: acceptedIds }) });
       toast(d.message, 'success');
       loadOrder();
     } catch (e) { toast(e.message, 'error'); }
@@ -232,11 +502,17 @@
   async function updateStatus(status) {
     if (status === 'CANCELLED' && !confirm('Yakin batalkan order ini?')) return;
     try {
-      await api(`/api/orders/${orderId}/status`, {
-        method: 'POST',
-        body: JSON.stringify({ status, actor_type: 'USER', actor_id: session.id }),
-      });
+      await api(`/api/orders/${orderId}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       toast('Status order diperbarui', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function closeTicket() {
+    if (!confirm('Tutup tiket ini? Pastikan semua bukti & transfer sudah lengkap.')) return;
+    try {
+      await api(`/api/orders/${orderId}/close`, { method: 'POST', body: JSON.stringify({}) });
+      toast('Tiket berhasil ditutup', 'success');
       loadOrder();
     } catch (e) { toast(e.message, 'error'); }
   }

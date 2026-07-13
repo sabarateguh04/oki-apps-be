@@ -2,16 +2,27 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const { emitToDashboard } = require('../socket');
+const { requireAuth, requireRole, requireTechnician } = require('../middleware/auth');
 
 const router = express.Router();
 
-/* GET /api/technicians?status=READY */
+const PROFILE_FIELDS = [
+  'nama', 'no_hp', 'email', 'skill', 'spesialisasi', 'sertifikasi', 'wilayah_kerja',
+  'alamat', 'tanggal_lahir', 'no_ktp', 'nama_bank', 'no_rekening', 'nama_rekening', 'is_active',
+];
+
+const PROFILE_SELECT = `id, username, nama, no_hp, email, skill, spesialisasi, sertifikasi,
+  wilayah_kerja, alamat, tanggal_lahir, no_ktp, nama_bank, no_rekening, nama_rekening,
+  status, latitude, longitude, last_location_at, is_active, created_at`;
+
+// Semua endpoint teknisi wajib login (staff ATAU teknisi yang bersangkutan buat status/lokasi)
+router.use(requireAuth);
+
+/* GET /api/technicians?status=READY — staff manapun boleh lihat */
 router.get('/', async (req, res) => {
   const { status } = req.query;
   try {
-    let sql = `SELECT id, username, nama, no_hp, email, skill, status,
-                      latitude, longitude, last_location_at, is_active, created_at
-               FROM oki_technicians WHERE is_active = 1`;
+    let sql = `SELECT ${PROFILE_SELECT} FROM oki_technicians WHERE is_active = 1`;
     const params = [];
     if (status) { sql += ` AND status = ?`; params.push(status); }
     sql += ` ORDER BY nama ASC`;
@@ -26,21 +37,17 @@ router.get('/', async (req, res) => {
 /* GET /api/technicians/:id */
 router.get('/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT id, username, nama, no_hp, email, skill, status, latitude, longitude,
-              last_location_at, is_active, created_at
-       FROM oki_technicians WHERE id = ?`,
-      [req.params.id],
-    );
+    const [rows] = await pool.query(`SELECT ${PROFILE_SELECT} FROM oki_technicians WHERE id = ?`, [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Teknisi tidak ditemukan' });
 
-    // Sekalian kasih ringkasan performa (dipakai halaman Profile Teknisi)
     const [perf] = await pool.query(
       `SELECT
-         COUNT(*) AS total_order,
-         SUM(status = 'DONE') AS total_selesai,
-         AVG(TIMESTAMPDIFF(MINUTE, assigned_at, selesai_at)) AS avg_durasi_menit
-       FROM oki_orders WHERE technician_id = ?`,
+         COUNT(ot.order_id) AS total_order,
+         SUM(o.status = 'DONE') AS total_selesai,
+         AVG(TIMESTAMPDIFF(MINUTE, o.assigned_at, o.selesai_at)) AS avg_durasi_menit
+       FROM oki_order_technicians ot
+       JOIN oki_orders o ON o.id = ot.order_id
+       WHERE ot.technician_id = ? AND ot.status = 'ASSIGNED'`,
       [req.params.id],
     );
 
@@ -51,10 +58,10 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/* POST /api/technicians */
-router.post('/', async (req, res) => {
-  const { username, password, nama, no_hp, email, skill } = req.body;
-  if (!username || !password || !nama) {
+/* POST /api/technicians — hanya ADMIN yang boleh tambah teknisi baru */
+router.post('/', requireRole('ADMIN'), async (req, res) => {
+  const { username, password, ...profile } = req.body;
+  if (!username || !password || !profile.nama) {
     return res.status(400).json({ success: false, message: 'username, password, nama wajib diisi' });
   }
   try {
@@ -63,9 +70,15 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ success: false, message: 'Username sudah dipakai' });
     }
     const hash = await bcrypt.hash(password, 10);
+    const cols = ['username', 'password', ...PROFILE_FIELDS.filter(f => f !== 'is_active')];
+    const values = cols.map(f => {
+      if (f === 'username') return username;
+      if (f === 'password') return hash;
+      return profile[f] === undefined || profile[f] === '' ? null : profile[f];
+    });
     const [result] = await pool.query(
-      `INSERT INTO oki_technicians (username, password, nama, no_hp, email, skill) VALUES (?, ?, ?, ?, ?, ?)`,
-      [username, hash, nama, no_hp || null, email || null, skill || null],
+      `INSERT INTO oki_technicians (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      values,
     );
     return res.json({ success: true, technicianId: result.insertId });
   } catch (e) {
@@ -74,14 +87,22 @@ router.post('/', async (req, res) => {
   }
 });
 
-/* PUT /api/technicians/:id */
-router.put('/:id', async (req, res) => {
-  const { nama, no_hp, email, skill, is_active } = req.body;
+/* PUT /api/technicians/:id — hanya ADMIN */
+router.put('/:id', requireRole('ADMIN'), async (req, res) => {
+  const b = req.body;
   try {
+    const values = PROFILE_FIELDS.map(f => {
+      if (f === 'is_active') return b.is_active === undefined ? 1 : b.is_active;
+      return b[f] === undefined || b[f] === '' ? null : b[f];
+    });
     await pool.query(
-      `UPDATE oki_technicians SET nama=?, no_hp=?, email=?, skill=?, is_active=? WHERE id = ?`,
-      [nama, no_hp, email, skill, is_active === undefined ? 1 : is_active, req.params.id],
+      `UPDATE oki_technicians SET ${PROFILE_FIELDS.map(f => `${f}=?`).join(', ')} WHERE id = ?`,
+      [...values, req.params.id],
     );
+    if (b.password) {
+      const hash = await bcrypt.hash(b.password, 10);
+      await pool.query(`UPDATE oki_technicians SET password = ? WHERE id = ?`, [hash, req.params.id]);
+    }
     return res.json({ success: true, message: 'Teknisi berhasil diupdate' });
   } catch (e) {
     console.error('[TECH update]', e.message);
@@ -91,15 +112,16 @@ router.put('/:id', async (req, res) => {
 
 /* ═══════════════════════════════════════════════════
    POST /api/technicians/:id/status
-   Toggle status teknisi. Ini yang dipencet di halaman "Profile Teknisi"
-   buat masuk mode READY (siap jalan) — begitu READY, mobile app mulai
-   ngirim GPS tiap 30 detik lewat endpoint /location di bawah.
+   Teknisi hanya boleh ubah status DIRINYA SENDIRI.
    body: { status: 'OFFLINE' | 'READY' | 'ON_DUTY' }
 ═══════════════════════════════════════════════════ */
-router.post('/:id/status', async (req, res) => {
+router.post('/:id/status', requireTechnician, async (req, res) => {
   const { status } = req.body;
   if (!['OFFLINE', 'READY', 'ON_DUTY'].includes(status)) {
     return res.status(400).json({ success: false, message: 'status tidak valid' });
+  }
+  if (Number(req.user.id) !== Number(req.params.id)) {
+    return res.status(403).json({ success: false, message: 'Tidak boleh ubah status teknisi lain' });
   }
   try {
     await pool.query(`UPDATE oki_technicians SET status = ? WHERE id = ?`, [status, req.params.id]);
@@ -113,15 +135,16 @@ router.post('/:id/status', async (req, res) => {
 
 /* ═══════════════════════════════════════════════════
    POST /api/technicians/:id/location
-   GPS ping — dipanggil mobile app tiap 30 detik SELAMA status READY
-   (atau ON_DUTY, saat lagi otw ke lokasi order). Kalau status OFFLINE,
-   ping ditolak (gak ada gunanya nyimpen lokasi teknisi yang lagi gak aktif).
+   GPS ping tiap 30 detik SELAMA status READY/ON_DUTY.
    body: { latitude, longitude, orderId? }
 ═══════════════════════════════════════════════════ */
-router.post('/:id/location', async (req, res) => {
+router.post('/:id/location', requireTechnician, async (req, res) => {
   const { latitude, longitude, orderId } = req.body;
   if (latitude === undefined || longitude === undefined) {
     return res.status(400).json({ success: false, message: 'latitude & longitude wajib diisi' });
+  }
+  if (Number(req.user.id) !== Number(req.params.id)) {
+    return res.status(403).json({ success: false, message: 'Tidak boleh kirim lokasi atas nama teknisi lain' });
   }
 
   try {

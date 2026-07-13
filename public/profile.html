@@ -7,6 +7,11 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .offer-card{ border:1px solid #ffe8a3; background:#fffbea; border-radius:12px; padding:12px; margin-bottom:10px; }
+  .history-row{ border-bottom:1px solid #f0f0f0; padding:10px 0; }
+  .history-row:last-child{ border-bottom:none; }
+</style>
 </head>
 <body>
 
@@ -29,7 +34,7 @@
         <div class="card mb-3">
           <div class="card-header"><i class="bi bi-broadcast"></i> Status Kerja</div>
           <div class="card-body">
-            <p class="text-muted small">Set status ke <b>READY</b> supaya bisa di-assign order &amp; mulai kirim lokasi GPS tiap 30 detik ke dashboard.</p>
+            <p class="text-muted small">Set status ke <b>READY</b> supaya bisa ditawari order &amp; mulai kirim lokasi GPS tiap 30 detik ke dashboard.</p>
             <div class="status-toggle mb-2">
               <button id="btn-offline" class="selected-offline" onclick="setStatus('OFFLINE')"><i class="bi bi-power"></i> Offline</button>
               <button id="btn-ready" class="selected-ready" onclick="setStatus('READY')"><i class="bi bi-broadcast"></i> Ready</button>
@@ -53,14 +58,27 @@
       </div>
 
       <div class="col-lg-8">
-        <div class="card">
+
+        <div class="card mb-3" id="offers-card" style="display:none;">
+          <div class="card-header"><i class="bi bi-bell"></i> Tawaran Tugas Baru</div>
+          <div class="card-body" id="offers-body"></div>
+        </div>
+
+        <div class="card mb-3">
           <div class="card-header"><i class="bi bi-clipboard-check"></i> Order Aktif Saya</div>
           <div class="card-body" id="active-order-body">
             <div class="skeleton" style="height:120px;"></div>
           </div>
         </div>
-      </div>
 
+        <div class="card">
+          <div class="card-header"><i class="bi bi-clock-history"></i> Riwayat Tugas</div>
+          <div class="card-body" id="history-body">
+            <div class="skeleton" style="height:80px;"></div>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
 </div>
@@ -81,14 +99,20 @@
 
   function boot() {
     loadProfile();
+    loadOffers();
+    loadHistory();
     connectSocket();
   }
 
   function connectSocket() {
     socket = io({ transports: ['websocket'] });
     socket.on('connect', () => socket.emit('register-technician', session.id));
-    socket.on('new-assignment', (data) => {
-      toast('Ada order baru yang di-assign ke kamu!', 'success');
+    socket.on('new-offer', () => {
+      toast('Ada tawaran tugas baru buat kamu!', 'success');
+      loadOffers();
+    });
+    socket.on('assignment-confirmed', () => {
+      toast('Tugas kamu sudah dikonfirmasi admin, siap dikerjakan!', 'success');
       loadActiveOrder();
     });
   }
@@ -99,7 +123,7 @@
       const t = d.technician, p = d.performance;
       document.getElementById('avatar').textContent = (t.nama || '?').slice(0,1).toUpperCase();
       document.getElementById('tech-nama').textContent = t.nama;
-      document.getElementById('tech-skill').textContent = t.skill || '-';
+      document.getElementById('tech-skill').textContent = t.spesialisasi || t.skill || '-';
       document.getElementById('tech-status-badge').innerHTML = techStatusBadge(t.status);
       document.getElementById('perf-total').textContent = p.total_order || 0;
       document.getElementById('perf-selesai').textContent = p.total_selesai || 0;
@@ -131,15 +155,12 @@
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  /* ── GPS ping tiap 30 detik selama status bukan OFFLINE ──
-     Ini yang mengimplementasikan requirement "kirim GPS tiap 30 detik
-     saat status Ready". Kalau browser/device gak kasih izin lokasi,
-     kita kasih tau lewat toast sekali, gak spam. */
+  /* ── GPS ping tiap 30 detik selama status bukan OFFLINE ── */
   let gpsPermissionWarned = false;
 
   function startGpsLoop() {
     if (gpsTimer) return;
-    sendGpsPing(); // langsung kirim sekali begitu jadi READY
+    sendGpsPing();
     gpsTimer = setInterval(sendGpsPing, 30000);
   }
   function stopGpsLoop() {
@@ -161,17 +182,59 @@
           document.getElementById('gps-last').textContent = '(terakhir: ' + new Date().toLocaleTimeString('id-ID') + ')';
         } catch (e) { console.error('[GPS]', e.message); }
       },
-      (err) => {
+      () => {
         if (!gpsPermissionWarned) { toast('Izin lokasi ditolak — GPS tidak bisa dikirim', 'error'); gpsPermissionWarned = true; }
       },
       { enableHighAccuracy: true, timeout: 10000 },
     );
   }
 
+  /* ── Tawaran tugas (belum direspon) ── */
+  async function loadOffers() {
+    const card = document.getElementById('offers-card');
+    const body = document.getElementById('offers-body');
+    try {
+      const d = await api('/api/orders/offers/mine');
+      if (!d.offers.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+      body.innerHTML = d.offers.map(o => `
+        <div class="offer-card">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <b>${o.order_no}</b> — ${escapeHtml(o.nama_perusahaan)}
+              <div class="text-muted small">${escapeHtml(o.wilayah || '-')} · ${o.tanggal_mulai ? fmtDate(o.tanggal_mulai) : 'Jadwal belum ditentukan'}</div>
+              <div class="small mt-1">${escapeHtml(o.description || '')}</div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-sm btn-success flex-grow-1" onclick="respondOffer(${o.id}, 'ACCEPTED')"><i class="bi bi-check-lg"></i> Terima</button>
+            <button class="btn btn-sm btn-outline-danger flex-grow-1" onclick="respondOffer(${o.id}, 'REJECTED')"><i class="bi bi-x-lg"></i> Tolak</button>
+          </div>
+        </div>
+      `).join('');
+    } catch (e) {
+      card.style.display = 'block';
+      body.innerHTML = `<div class="text-danger small">${e.message}</div>`;
+    }
+  }
+
+  async function respondOffer(orderId, response) {
+    let note = null;
+    if (response === 'REJECTED') {
+      note = prompt('Alasan menolak (opsional):') || null;
+    }
+    try {
+      await api(`/api/orders/${orderId}/respond`, { method: 'POST', body: JSON.stringify({ response, note }) });
+      toast(response === 'ACCEPTED' ? 'Tugas diterima, menunggu konfirmasi admin' : 'Tugas ditolak', 'success');
+      loadOffers();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  /* ── Order aktif (sudah di-assign final, lagi dikerjakan) ── */
   async function loadActiveOrder() {
     const body = document.getElementById('active-order-body');
     try {
-      const d = await api(`/api/orders?technician_id=${session.id}&limit=5`);
+      const d = await api(`/api/orders?technician_id=${session.id}&limit=20`);
       const active = d.orders.find(o => ['ASSIGNED','ON_THE_WAY','IN_PROGRESS'].includes(o.status));
       if (!active) {
         body.innerHTML = '<div class="empty-state"><i class="bi bi-clipboard-x"></i><p>Belum ada order aktif yang ditugaskan ke kamu.</p></div>';
@@ -186,12 +249,13 @@
         </div>
         <p class="text-muted">${escapeHtml(o.description || 'Tidak ada deskripsi.')}</p>
         <div class="row mb-3">
-          <div class="col-6 text-muted small">Alamat</div><div class="col-6 fw-semibold">${escapeHtml(o.customer_alamat || '-')}</div>
+          <div class="col-6 text-muted small">Alamat</div><div class="col-6 fw-semibold">${escapeHtml(o.alamat_detail || o.customer_alamat || '-')}</div>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
           ${o.status === 'ASSIGNED' ? `<button class="btn btn-warning" onclick="updateMyStatus(${o.id}, 'ON_THE_WAY')"><i class="bi bi-signpost"></i> Menuju Lokasi</button>` : ''}
           ${o.status === 'ON_THE_WAY' ? `<button class="btn" style="background:#fd7e14;color:#fff;" onclick="updateMyStatus(${o.id}, 'IN_PROGRESS')"><i class="bi bi-tools"></i> Mulai Kerjakan</button>` : ''}
           ${o.status === 'IN_PROGRESS' ? `<button class="btn btn-success" onclick="updateMyStatus(${o.id}, 'DONE')"><i class="bi bi-check-lg"></i> Selesaikan Order</button>` : ''}
+          <a href="task-detail?id=${o.id}" class="btn btn-outline-primary"><i class="bi bi-file-earmark-text"></i> Lihat Detail &amp; Upload Bukti Pekerjaan</a>
         </div>
       `;
     } catch (e) {
@@ -201,14 +265,38 @@
 
   async function updateMyStatus(orderId, status) {
     try {
-      await api(`/api/orders/${orderId}/status`, {
-        method: 'POST',
-        body: JSON.stringify({ status, actor_type: 'TECHNICIAN', actor_id: session.id }),
-      });
+      await api(`/api/orders/${orderId}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       toast('Status order diperbarui', 'success');
       loadActiveOrder();
-      loadProfile(); // status teknisi mungkin ikut berubah (mis. balik ke READY saat DONE)
+      loadProfile();
+      loadHistory();
     } catch (e) { toast(e.message, 'error'); }
+  }
+
+  /* ── Riwayat tugas (semua order yang pernah di-assign, TERMASUK yang
+       udah DONE/CLOSED/CANCELLED — ini yang sebelumnya "ilang" karena
+       cuma order aktif yang ditampilkan) ── */
+  async function loadHistory() {
+    const body = document.getElementById('history-body');
+    try {
+      const d = await api(`/api/orders?technician_id=${session.id}&limit=50`);
+      const history = d.orders.filter(o => ['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status));
+      if (!history.length) {
+        body.innerHTML = '<div class="empty-state"><i class="bi bi-clock-history"></i><p>Belum ada riwayat tugas.</p></div>';
+        return;
+      }
+      body.innerHTML = history.map(o => `
+        <a href="task-detail?id=${o.id}" class="history-row d-flex justify-content-between align-items-center flex-wrap gap-2 text-decoration-none text-reset">
+          <div>
+            <b>${o.order_no}</b> — ${escapeHtml(o.nama_perusahaan)}
+            <div class="text-muted small">${fmtDate(o.created_at)} ${o.selesai_at ? '· selesai ' + fmtDate(o.selesai_at) : ''}</div>
+          </div>
+          <div>${statusBadge(o.status)} <i class="bi bi-chevron-right text-muted"></i></div>
+        </a>
+      `).join('');
+    } catch (e) {
+      body.innerHTML = `<div class="text-danger small">${e.message}</div>`;
+    }
   }
 </script>
 </body>

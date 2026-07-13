@@ -21,7 +21,7 @@
       </div>
       <div class="card-body p-0">
         <table class="table mb-0">
-          <thead><tr><th>Nama Perusahaan</th><th>PIC</th><th>No. HP</th><th>Alamat</th><th class="text-end">Aksi</th></tr></thead>
+          <thead><tr><th>Nama Perusahaan</th><th>Wilayah</th><th>PIC</th><th>Telp</th><th class="text-end">Aksi</th></tr></thead>
           <tbody id="customer-body">
             <tr><td colspan="5"><div class="skeleton" style="height:18px;margin:8px 0;"></div></td></tr>
           </tbody>
@@ -33,7 +33,7 @@
 
 <!-- Modal -->
 <div class="modal fade" id="customerModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content" style="border-radius:16px;">
       <div class="modal-header">
         <h5 class="modal-title" id="modal-title">Tambah Customer</h5>
@@ -41,10 +41,32 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="c-id">
-        <div class="mb-3"><label class="form-label">Nama Perusahaan *</label><input class="form-control" id="c-nama"></div>
-        <div class="mb-3"><label class="form-label">Nama PIC</label><input class="form-control" id="c-pic"></div>
-        <div class="mb-3"><label class="form-label">No. HP PIC</label><input class="form-control" id="c-hp"></div>
-        <div class="mb-3"><label class="form-label">Alamat</label><textarea class="form-control" id="c-alamat" rows="2"></textarea></div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Info Perusahaan</h6>
+        <div class="row">
+          <div class="col-md-8 mb-3"><label class="form-label">Nama Perusahaan *</label><input class="form-control" id="c-nama"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Telp Perusahaan</label><input class="form-control" id="c-telp"></div>
+        </div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">PIC (Person in Charge)</h6>
+        <div class="row">
+          <div class="col-md-4 mb-3"><label class="form-label">Nama PIC</label><input class="form-control" id="c-pic"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">No. HP PIC</label><input class="form-control" id="c-hp"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Email PIC</label><input type="email" class="form-control" id="c-email"></div>
+        </div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Alamat</h6>
+        <div class="mb-3"><label class="form-label">Alamat Lengkap</label><textarea class="form-control" id="c-alamat" rows="2"></textarea></div>
+        <div class="row">
+          <div class="col-md-3 mb-3"><label class="form-label">Provinsi</label><input class="form-control" id="c-provinsi"></div>
+          <div class="col-md-3 mb-3"><label class="form-label">Kab/Kota</label><input class="form-control" id="c-kabkota"></div>
+          <div class="col-md-3 mb-3"><label class="form-label">Kecamatan</label><input class="form-control" id="c-kec"></div>
+          <div class="col-md-3 mb-3"><label class="form-label">Kode Pos</label><input class="form-control" id="c-kodepos"></div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3"><label class="form-label">Latitude</label><input type="number" step="any" class="form-control" id="c-lat" placeholder="mis. -6.4025"></div>
+          <div class="col-md-6 mb-3"><label class="form-label">Longitude</label><input type="number" step="any" class="form-control" id="c-lng" placeholder="mis. 106.7942"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
@@ -59,9 +81,13 @@
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  if (session) { renderLayout({ active: 'customer', title: 'Master Customer' }); loadCustomers(); }
-
   let modal, customers = [];
+  if (session && session.role !== 'ADMIN') {
+    document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Customer hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
+  } else if (session) {
+    renderLayout({ active: 'customer', title: 'Master Customer' });
+    loadCustomers();
+  }
 
   async function loadCustomers() {
     const body = document.getElementById('customer-body');
@@ -75,9 +101,9 @@
       body.innerHTML = customers.map(c => `
         <tr>
           <td><b>${escapeHtml(c.nama_perusahaan)}</b></td>
+          <td class="text-muted small">${escapeHtml([c.kabupaten_kota, c.provinsi].filter(Boolean).join(', ') || '-')}</td>
           <td>${escapeHtml(c.pic_nama || '-')}</td>
-          <td>${escapeHtml(c.pic_hp || '-')}</td>
-          <td class="text-muted small">${escapeHtml(c.alamat || '-')}</td>
+          <td>${escapeHtml(c.telp_perusahaan || c.pic_hp || '-')}</td>
           <td class="text-end">
             <button class="btn btn-sm btn-outline-primary" onclick="openModal(${c.id})"><i class="bi bi-pencil"></i></button>
             <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${c.id})"><i class="bi bi-trash"></i></button>
@@ -90,13 +116,21 @@
 
   function openModal(id) {
     if (!modal) modal = new bootstrap.Modal(document.getElementById('customerModal'));
-    const c = customers.find(x => x.id === id);
-    document.getElementById('modal-title').textContent = c ? 'Edit Customer' : 'Tambah Customer';
-    document.getElementById('c-id').value = c ? c.id : '';
-    document.getElementById('c-nama').value = c ? c.nama_perusahaan : '';
-    document.getElementById('c-pic').value = c ? (c.pic_nama || '') : '';
-    document.getElementById('c-hp').value = c ? (c.pic_hp || '') : '';
-    document.getElementById('c-alamat').value = c ? (c.alamat || '') : '';
+    const c = customers.find(x => x.id === id) || {};
+    document.getElementById('modal-title').textContent = id ? 'Edit Customer' : 'Tambah Customer';
+    document.getElementById('c-id').value = id || '';
+    document.getElementById('c-nama').value = c.nama_perusahaan || '';
+    document.getElementById('c-telp').value = c.telp_perusahaan || '';
+    document.getElementById('c-pic').value = c.pic_nama || '';
+    document.getElementById('c-hp').value = c.pic_hp || '';
+    document.getElementById('c-email').value = c.pic_email || '';
+    document.getElementById('c-alamat').value = c.alamat || '';
+    document.getElementById('c-provinsi').value = c.provinsi || '';
+    document.getElementById('c-kabkota').value = c.kabupaten_kota || '';
+    document.getElementById('c-kec').value = c.kecamatan || '';
+    document.getElementById('c-kodepos').value = c.kode_pos || '';
+    document.getElementById('c-lat').value = c.latitude || '';
+    document.getElementById('c-lng').value = c.longitude || '';
     modal.show();
   }
 
@@ -104,9 +138,17 @@
     const id = document.getElementById('c-id').value;
     const payload = {
       nama_perusahaan: document.getElementById('c-nama').value.trim(),
+      telp_perusahaan: document.getElementById('c-telp').value.trim(),
       pic_nama: document.getElementById('c-pic').value.trim(),
       pic_hp: document.getElementById('c-hp').value.trim(),
+      pic_email: document.getElementById('c-email').value.trim(),
       alamat: document.getElementById('c-alamat').value.trim(),
+      provinsi: document.getElementById('c-provinsi').value.trim(),
+      kabupaten_kota: document.getElementById('c-kabkota').value.trim(),
+      kecamatan: document.getElementById('c-kec').value.trim(),
+      kode_pos: document.getElementById('c-kodepos').value.trim(),
+      latitude: document.getElementById('c-lat').value || null,
+      longitude: document.getElementById('c-lng').value || null,
     };
     if (!payload.nama_perusahaan) { toast('Nama perusahaan wajib diisi', 'error'); return; }
     try {

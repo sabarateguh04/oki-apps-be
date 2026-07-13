@@ -34,7 +34,7 @@
           <option value="LOW">LOW</option>
         </select>
         <button class="btn btn-sm btn-outline-secondary" onclick="loadOrders(currentPage)"><i class="bi bi-arrow-clockwise"></i></button>
-        <a href="form-order.html" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg"></i> Buat Order</a>
+        <a href="form-order" class="btn btn-sm btn-primary" id="btn-buat-order" style="display:none;"><i class="bi bi-plus-lg"></i> Buat Order</a>
       </div>
       <div class="card-body p-0">
         <table class="table mb-0">
@@ -62,9 +62,12 @@
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  if (session) { renderLayout({ active: 'orders', title: 'Data Order' }); loadOrders(1); }
-
   let currentPage = 1, totalPages = 1;
+  if (session) {
+    renderLayout({ active: 'orders', title: 'Data Order' });
+    if (hasRole('ADMIN')) document.getElementById('btn-buat-order').style.display = '';
+    loadOrders(1);
+  }
 
   async function loadOrders(page) {
     if (page < 1) return;
@@ -84,14 +87,14 @@
         body.innerHTML = '<tr><td colspan="8"><div class="empty-state"><i class="bi bi-inbox"></i><p>Tidak ada order</p></div></td></tr>';
       } else {
         body.innerHTML = d.orders.map(o => `
-          <tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+          <tr class="clickable" onclick="location.href='order-detail?id=${o.id}'">
             <td><b>${o.order_no}</b></td>
             <td>${escapeHtml(o.nama_perusahaan)}</td>
             <td>${o.category}</td>
             <td>${priorityBadge(o.priority)}</td>
             <td>${statusBadge(o.status)}</td>
             <td>${approvalBadge(o.approval_status)}</td>
-            <td>${o.technician_nama ? escapeHtml(o.technician_nama) : '<span class="text-muted">-</span>'}</td>
+            <td>${o.technician_names ? escapeHtml(o.technician_names) : '<span class="text-muted">-</span>'}</td>
             <td class="text-muted small">${fmtDate(o.created_at)}</td>
           </tr>`).join('');
       }

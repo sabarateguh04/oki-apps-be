@@ -6,13 +6,27 @@
 
 const SESSION_KEY = 'oki_session';
 
-/* ── API fetch wrapper ── */
+/* ── API fetch wrapper ──
+   Otomatis nempelin Authorization: Bearer <token> dari session yang lagi
+   login, supaya backend bisa ngecek role beneran (bukan cuma sembunyiin
+   tombol di frontend). Kalau token expired/invalid (401), langsung logout
+   & lempar ke halaman login. */
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const session = getSession();
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (session && session.token) headers.Authorization = `Bearer ${session.token}`;
+
+  const res = await fetch(path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    clearSession();
+    if (!location.pathname.endsWith('index') && location.pathname !== '/') {
+      window.location.href = 'index';
+    }
+    throw new Error(data.message || 'Sesi habis, silakan login ulang.');
+  }
+
   if (!res.ok || data.success === false) {
     throw new Error(data.message || 'Terjadi kesalahan, coba lagi.');
   }
@@ -20,7 +34,7 @@ async function api(path, opts = {}) {
 }
 
 /* ── Session (localStorage) ──
-   { type: 'staff'|'technician', id, username, nama, role|status } */
+   { type: 'staff'|'technician', id, username, nama, role|status, token } */
 function getSession() {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
   catch (_) { return null; }
@@ -33,15 +47,46 @@ function clearSession() { localStorage.removeItem(SESSION_KEY); }
 function requireAuth(allowedTypes) {
   const session = getSession();
   if (!session || !allowedTypes.includes(session.type)) {
-    window.location.href = 'index.html';
+    window.location.href = 'index';
     return null;
   }
   return session;
 }
 
+/* ── Upload file (multipart/form-data) ──
+   Beda dari api() biasa: JANGAN set Content-Type manual, browser yang
+   nentuin boundary-nya otomatis pas body-nya FormData. */
+async function apiUpload(path, formData) {
+  const session = getSession();
+  const headers = {};
+  if (session && session.token) headers.Authorization = `Bearer ${session.token}`;
+
+  const res = await fetch(path, { method: 'POST', headers, body: formData });
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    clearSession();
+    window.location.href = 'index';
+    throw new Error(data.message || 'Sesi habis, silakan login ulang.');
+  }
+  if (!res.ok || data.success === false) {
+    throw new Error(data.message || 'Gagal upload file.');
+  }
+  return data;
+}
+
 function logout() {
   clearSession();
-  window.location.href = 'index.html';
+  window.location.href = 'index';
+}
+
+/* ── Role helper ──
+   Dipakai buat nampilin/nyembunyiin elemen UI sesuai role. INGAT: ini cuma
+   kosmetik (UX), keamanan sebenarnya di-enforce backend (lihat middleware
+   auth.js). Jangan andalkan ini sebagai satu-satunya proteksi. */
+function hasRole(...roles) {
+  const s = getSession();
+  return !!s && s.type === 'staff' && roles.includes(s.role);
 }
 
 /* ── Toast ── */
@@ -86,7 +131,7 @@ function relTime(iso) {
 /* ── Badge helpers ── */
 const STATUS_LABEL = {
   NEW: 'Baru', ASSIGNED: 'Ditugaskan', ON_THE_WAY: 'Menuju Lokasi',
-  IN_PROGRESS: 'Dikerjakan', DONE: 'Selesai', REJECTED: 'Ditolak', CANCELLED: 'Dibatalkan',
+  IN_PROGRESS: 'Dikerjakan', DONE: 'Selesai', CLOSED: 'Ditutup', REJECTED: 'Ditolak', CANCELLED: 'Dibatalkan',
 };
 function statusBadge(status) {
   return `<span class="badge badge-status-${status}">${STATUS_LABEL[status] || status}</span>`;

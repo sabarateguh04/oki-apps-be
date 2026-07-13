@@ -1,47 +1,74 @@
 /**
- * Menentukan apakah order boleh di-assign ke teknisi, plus alasan blok-nya
- * kalau belum boleh — persis logic dari flowchart "ASSIGN BUTTON VISIBILITY":
+ * Menentukan apakah order boleh di-"Konfirmasi & Assign" FINAL, plus alasan
+ * blok-nya kalau belum boleh.
  *
- *   CONDITION 1: Atasan sudah APPROVE?
- *     NO  → HIDDEN, "Menunggu approval atasan"
- *   CONDITION 2: Pre-Bayar sudah SELESAI? (kalau ada pre-bayar)
- *     Ada pre-bayar & PENDING → HIDDEN, "Menunggu proses Finance untuk pre-bayar"
- *     Gak ada pre-bayar        → SKIP (dianggap selesai)
- *   CONDITION 3: Jasa Teknisi sudah DI-TRANSFER? (HANYA kalau bayar SEBELUM)
- *     timing SEBELUM & PENDING → HIDDEN, "Menunggu TF jasa teknisi"
- *     timing SESUDAH            → SKIP
+ * ALUR LENGKAPNYA:
+ *   1. Admin nge-flag (tawarin) 1+ teknisi -> status PLANNED. Ini BOLEH
+ *      kapan aja, gak dicek fungsi ini sama sekali.
+ *   2. Teknisi yang ditawarin ACCEPT atau REJECT. Kalau REJECT, admin
+ *      tawarin ke teknisi lain (flag baru).
+ *   3. Begitu ADA teknisi yang ACCEPTED, DAN semua syarat di bawah lolos,
+ *      admin baru bisa klik "Konfirmasi & Assign" -> baris ACCEPTED
+ *      dipromosikan jadi ASSIGNED (final, teknisi baru boleh mulai kerja).
  *
- * Dipakai di DUA tempat: endpoint GET order-detail (buat kasih tau frontend
- * apakah tombol Assign harus ditampilkan + alasan block-nya), dan endpoint
- * POST assign itu sendiri (buat nge-block request langsung ke API, bukan
- * cuma nyembunyiin tombol di UI — karena UI bisa di-bypass).
+ * SYARAT (semua harus lolos):
+ *   CONDITION 1: Atasan sudah APPROVE order ini?
+ *   CONDITION 2: Semua kebutuhan pra-assign (barang yang wajib dibeli,
+ *                mis. modem/sparepart) sudah berstatus DIBELI?
+ *   CONDITION 3: Semua rincian biaya dengan timing_bayar = SEBELUM
+ *                (mis. transport, uang makan, DP material) sudah
+ *                ditransfer Finance (status DONE)? Biaya SESUDAH (mis.
+ *                jasa teknisi) TIDAK ngeblok assign — itu baru dibayar
+ *                Finance setelah order selesai dikerjakan (DONE).
+ *   CONDITION 4: Ada minimal 1 teknisi yang statusnya ACCEPTED?
  *
- * @param {object} order - row dari tabel `orders`
+ * @param {object} order - row dari tabel `oki_orders`
+ * @param {number} pendingKebutuhanCount - jumlah item kebutuhan pra-assign yang masih PENDING
+ * @param {number} pendingBiayaSebelumCount - jumlah baris biaya timing SEBELUM yang masih PENDING
+ * @param {number} acceptedTechnicianCount - jumlah teknisi berstatus ACCEPTED di order ini
+ * @param {number} assignedTechnicianCount - jumlah teknisi yang statusnya sudah ASSIGNED
  * @returns {{ eligible: boolean, reason: string|null, blockedAt: string|null }}
  */
-function getAssignEligibility(order) {
-  // CONDITION 1
+function getAssignEligibility(
+  order,
+  pendingKebutuhanCount = 0,
+  pendingBiayaSebelumCount = 0,
+  acceptedTechnicianCount = 0,
+  assignedTechnicianCount = 0,
+) {
   if (order.approval_status !== 'APPROVED') {
     return { eligible: false, reason: 'Menunggu approval atasan', blockedAt: 'APPROVAL' };
   }
 
-  // CONDITION 2 (cuma dicek kalau order ini memang ada pre-bayar)
-  if (order.has_pre_bayar && order.pre_bayar_status !== 'DONE') {
-    return { eligible: false, reason: 'Menunggu proses Finance untuk pre-bayar', blockedAt: 'PRE_BAYAR' };
+  if (pendingKebutuhanCount > 0) {
+    return {
+      eligible: false,
+      reason: `Masih ada ${pendingKebutuhanCount} kebutuhan yang belum dibeli/ditransfer`,
+      blockedAt: 'KEBUTUHAN_PRA_ASSIGN',
+    };
   }
 
-  // CONDITION 3 (cuma dicek kalau timing pembayaran jasa teknisi = SEBELUM eksekusi)
-  if (order.payment_timing === 'SEBELUM' && order.jasa_teknisi_transfer_status !== 'DONE') {
-    return { eligible: false, reason: 'Menunggu TF jasa teknisi', blockedAt: 'JASA_TEKNISI_TF' };
+  if (pendingBiayaSebelumCount > 0) {
+    return {
+      eligible: false,
+      reason: `Masih ada ${pendingBiayaSebelumCount} biaya (timing "Sebelum") yang belum ditransfer Finance`,
+      blockedAt: 'BIAYA_SEBELUM',
+    };
   }
 
-  // Guard tambahan di luar flowchart aslinya, tapi perlu supaya endpoint
-  // gak bisa "assign ulang" order yang sudah ada teknisinya atau yang
-  // statusnya sudah final. Hapus kalau memang gak diinginkan.
-  if (order.technician_id) {
+  if (assignedTechnicianCount > 0) {
     return { eligible: false, reason: 'Order ini sudah punya teknisi yang ditugaskan', blockedAt: 'ALREADY_ASSIGNED' };
   }
-  if (['DONE', 'CANCELLED', 'REJECTED'].includes(order.status)) {
+
+  if (acceptedTechnicianCount === 0) {
+    return {
+      eligible: false,
+      reason: 'Belum ada teknisi yang menerima tawaran tugas ini',
+      blockedAt: 'NO_ACCEPTED_TECHNICIAN',
+    };
+  }
+
+  if (['DONE', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(order.status)) {
     return { eligible: false, reason: `Order berstatus ${order.status}, tidak bisa di-assign`, blockedAt: 'TERMINAL_STATUS' };
   }
 

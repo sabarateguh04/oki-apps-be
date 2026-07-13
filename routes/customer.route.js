@@ -1,7 +1,17 @@
 const express = require('express');
 const pool = require('../db');
+const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+
+const FIELDS = [
+  'nama_perusahaan', 'pic_nama', 'pic_hp', 'pic_email', 'alamat',
+  'provinsi', 'kabupaten_kota', 'kecamatan', 'kode_pos', 'telp_perusahaan',
+  'latitude', 'longitude',
+];
+
+// Semua endpoint di bawah wajib login (staff manapun boleh LIHAT data customer)
+router.use(requireAuth);
 
 /* GET /api/customers */
 router.get('/', async (req, res) => {
@@ -26,17 +36,17 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/* POST /api/customers */
-router.post('/', async (req, res) => {
-  const { nama_perusahaan, pic_nama, pic_hp, alamat, latitude, longitude } = req.body;
-  if (!nama_perusahaan) {
+/* POST /api/customers — hanya ADMIN yang boleh kelola master data */
+router.post('/', requireRole('ADMIN'), async (req, res) => {
+  const b = req.body;
+  if (!b.nama_perusahaan) {
     return res.status(400).json({ success: false, message: 'nama_perusahaan wajib diisi' });
   }
   try {
+    const values = FIELDS.map(f => (b[f] === undefined || b[f] === '' ? null : b[f]));
     const [result] = await pool.query(
-      `INSERT INTO oki_customers (nama_perusahaan, pic_nama, pic_hp, alamat, latitude, longitude)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [nama_perusahaan, pic_nama || null, pic_hp || null, alamat || null, latitude || null, longitude || null],
+      `INSERT INTO oki_customers (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
+      values,
     );
     return res.json({ success: true, customerId: result.insertId });
   } catch (e) {
@@ -45,14 +55,14 @@ router.post('/', async (req, res) => {
   }
 });
 
-/* PUT /api/customers/:id */
-router.put('/:id', async (req, res) => {
-  const { nama_perusahaan, pic_nama, pic_hp, alamat, latitude, longitude } = req.body;
+/* PUT /api/customers/:id — hanya ADMIN */
+router.put('/:id', requireRole('ADMIN'), async (req, res) => {
+  const b = req.body;
   try {
+    const values = FIELDS.map(f => (b[f] === undefined || b[f] === '' ? null : b[f]));
     await pool.query(
-      `UPDATE oki_customers SET nama_perusahaan=?, pic_nama=?, pic_hp=?, alamat=?, latitude=?, longitude=?
-       WHERE id = ?`,
-      [nama_perusahaan, pic_nama, pic_hp, alamat, latitude || null, longitude || null, req.params.id],
+      `UPDATE oki_customers SET ${FIELDS.map(f => `${f}=?`).join(', ')} WHERE id = ?`,
+      [...values, req.params.id],
     );
     return res.json({ success: true, message: 'Customer berhasil diupdate' });
   } catch (e) {
@@ -61,8 +71,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-/* DELETE /api/customers/:id */
-router.delete('/:id', async (req, res) => {
+/* DELETE /api/customers/:id — hanya ADMIN */
+router.delete('/:id', requireRole('ADMIN'), async (req, res) => {
   try {
     // Jangan izinkan hapus customer yang masih punya order (integritas data)
     const [orders] = await pool.query(`SELECT COUNT(*) AS n FROM oki_orders WHERE customer_id = ?`, [req.params.id]);

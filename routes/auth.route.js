@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
+const { signStaffToken, signTechnicianToken, requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -29,8 +30,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Username atau password salah' });
     }
 
+    const token = signStaffToken(user);
+
     return res.json({
       success: true,
+      token,
       userId: user.id,
       username: user.username,
       nama: user.nama,
@@ -68,8 +72,11 @@ router.post('/login-technician', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Username atau password salah' });
     }
 
+    const token = signTechnicianToken(tech);
+
     return res.json({
       success: true,
+      token,
       technicianId: tech.id,
       username: tech.username,
       nama: tech.nama,
@@ -79,6 +86,14 @@ router.post('/login-technician', async (req, res) => {
     console.error('[AUTH login-technician]', e.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+/* ═══════════════════════════════════════════════════
+   GET /api/auth/me
+   Dipakai frontend buat verifikasi token masih valid + ambil profil terbaru
+═══════════════════════════════════════════════════ */
+router.get('/me', requireAuth, async (req, res) => {
+  return res.json({ success: true, user: req.user });
 });
 
 module.exports = router;

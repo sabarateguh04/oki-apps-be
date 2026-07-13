@@ -186,6 +186,7 @@ body{
 .badge-status-ON_THE_WAY{ background:#fff3cd; color:#997404; }
 .badge-status-IN_PROGRESS{ background:#ffe5d0; color:#c2540a; }
 .badge-status-DONE{ background:#d1f4e0; color:#146c43; }
+.badge-status-CLOSED{ background:#dbe4ff; color:#2f4b99; }
 .badge-status-REJECTED{ background:#f8d7da; color:#842029; }
 .badge-status-CANCELLED{ background:#e2e3e5; color:#41464b; }
 .badge-priority-HIGH{ background:#f8d7da; color:#842029; }

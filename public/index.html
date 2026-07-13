@@ -117,15 +117,15 @@
           method: 'POST',
           body: JSON.stringify({ username, password }),
         });
-        setSession({ type: 'staff', id: data.userId, username: data.username, nama: data.nama, role: data.role });
-        window.location.href = 'dashboard.html';
+        setSession({ type: 'staff', id: data.userId, username: data.username, nama: data.nama, role: data.role, token: data.token });
+        window.location.href = 'dashboard';
       } else {
         const data = await api('/api/auth/login-technician', {
           method: 'POST',
           body: JSON.stringify({ username, password }),
         });
-        setSession({ type: 'technician', id: data.technicianId, username: data.username, nama: data.nama, status: data.status });
-        window.location.href = 'profile.html';
+        setSession({ type: 'technician', id: data.technicianId, username: data.username, nama: data.nama, status: data.status, token: data.token });
+        window.location.href = 'profile';
       }
     } catch (err) {
       showError(err.message);
@@ -138,7 +138,7 @@
   // Kalau sudah login sebelumnya, langsung lempar ke halaman yang sesuai
   (function redirectIfLoggedIn(){
     const s = getSession();
-    if (s) window.location.href = s.type === 'technician' ? 'profile.html' : 'dashboard.html';
+    if (s) window.location.href = s.type === 'technician' ? 'profile' : 'dashboard';
   })();
 </script>
 </body>

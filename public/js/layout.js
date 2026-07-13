@@ -3,23 +3,28 @@
    renderLayout({ active: 'dashboard', title: 'Dashboard' })
 ============================================ */
 
-const STAFF_NAV = [
-  { key: 'dashboard', href: 'dashboard.html',  icon: 'bi-speedometer2', label: 'Dashboard' },
-  { key: 'orders',    href: 'orders.html',     icon: 'bi-list-task',    label: 'Data Order' },
-  { key: 'approval',  href: 'approval.html',   icon: 'bi-check2-square',label: 'Approval Order' },
-  { key: 'customer',  href: 'customer.html',   icon: 'bi-people',       label: 'Master Customer' },
-  { key: 'technician',href: 'technician.html', icon: 'bi-person-badge', label: 'Master Teknisi' },
+const ALL_STAFF_NAV = [
+  { key: 'dashboard', href: 'dashboard',  icon: 'bi-speedometer2', label: 'Dashboard',        roles: ['ADMIN','ATASAN','FINANCE','DISPATCHER'] },
+  { key: 'orders',    href: 'orders',     icon: 'bi-list-task',    label: 'Data Order',       roles: ['ADMIN','ATASAN','FINANCE','DISPATCHER'] },
+  { key: 'approval',  href: 'approval',   icon: 'bi-check2-square',label: 'Approval Order',   roles: ['ATASAN'] },
+  { key: 'customer',  href: 'customer',   icon: 'bi-people',       label: 'Master Customer',  roles: ['ADMIN'] },
+  { key: 'technician',href: 'technician', icon: 'bi-person-badge', label: 'Master Teknisi',   roles: ['ADMIN'] },
 ];
 
 const TECH_NAV = [
-  { key: 'profile', href: 'profile.html', icon: 'bi-person-circle', label: 'Profile Saya' },
+  { key: 'profile', href: 'profile', icon: 'bi-person-circle', label: 'Profile Saya' },
 ];
 
+/* Nav ditampilkan sesuai role login — bukan cuma kosmetik, tiap halaman
+   yang dibuka lewat link ini TETAP dilindungi backend (401/403) kalau
+   nekat diakses lewat URL langsung oleh role yang gak berhak. */
 function renderLayout({ active, title }) {
   const session = getSession();
   if (!session) return;
 
-  const nav = session.type === 'technician' ? TECH_NAV : STAFF_NAV;
+  const nav = session.type === 'technician'
+    ? TECH_NAV
+    : ALL_STAFF_NAV.filter(item => item.roles.includes(session.role));
   const navHtml = nav.map(item => `
     <a href="${item.href}" class="${item.key === active ? 'active' : ''}">
       <i class="bi ${item.icon}"></i> ${item.label}

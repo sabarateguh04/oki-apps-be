@@ -27,7 +27,7 @@
       </div>
       <div class="card-body p-0">
         <table class="table mb-0">
-          <thead><tr><th>Nama</th><th>Skill</th><th>No. HP</th><th>Status</th><th>Update Lokasi Terakhir</th><th class="text-end">Aksi</th></tr></thead>
+          <thead><tr><th>Nama</th><th>Spesialisasi</th><th>Wilayah Kerja</th><th>No. HP</th><th>Status</th><th class="text-end">Aksi</th></tr></thead>
           <tbody id="technician-body">
             <tr><td colspan="6"><div class="skeleton" style="height:18px;margin:8px 0;"></div></td></tr>
           </tbody>
@@ -37,21 +37,53 @@
   </div>
 </div>
 
-<!-- Modal tambah teknisi -->
+<!-- Modal tambah/edit teknisi -->
 <div class="modal fade" id="techModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content" style="border-radius:16px;">
       <div class="modal-header">
-        <h5 class="modal-title">Tambah Teknisi</h5>
+        <h5 class="modal-title" id="tech-modal-title">Tambah Teknisi</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-3"><label class="form-label">Nama *</label><input class="form-control" id="t-nama"></div>
-        <div class="mb-3"><label class="form-label">Username *</label><input class="form-control" id="t-username"></div>
-        <div class="mb-3"><label class="form-label">Password *</label><input type="password" class="form-control" id="t-password" placeholder="Minimal 6 karakter"></div>
-        <div class="mb-3"><label class="form-label">No. HP</label><input class="form-control" id="t-hp"></div>
-        <div class="mb-3"><label class="form-label">Email</label><input class="form-control" id="t-email"></div>
-        <div class="mb-3"><label class="form-label">Skill</label><input class="form-control" id="t-skill" placeholder="mis. Elektrikal, HVAC"></div>
+        <input type="hidden" id="t-id">
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Akun Login</h6>
+        <div class="row">
+          <div class="col-md-4 mb-3"><label class="form-label">Nama *</label><input class="form-control" id="t-nama"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Username *</label><input class="form-control" id="t-username"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Password <span id="pw-hint" class="text-muted small">*</span></label><input type="password" class="form-control" id="t-password" placeholder="Minimal 6 karakter"></div>
+        </div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Kontak</h6>
+        <div class="row">
+          <div class="col-md-6 mb-3"><label class="form-label">No. HP</label><input class="form-control" id="t-hp"></div>
+          <div class="col-md-6 mb-3"><label class="form-label">Email</label><input class="form-control" id="t-email"></div>
+        </div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Kompetensi</h6>
+        <div class="row">
+          <div class="col-md-6 mb-3"><label class="form-label">Skill</label><input class="form-control" id="t-skill" placeholder="mis. Elektrikal, HVAC"></div>
+          <div class="col-md-6 mb-3"><label class="form-label">Spesialisasi</label><input class="form-control" id="t-spesialisasi" placeholder="mis. Jaringan Fiber Optik"></div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3"><label class="form-label">Sertifikasi</label><input class="form-control" id="t-sertifikasi" placeholder="mis. K3 Listrik, BNSP"></div>
+          <div class="col-md-6 mb-3"><label class="form-label">Wilayah Kerja</label><input class="form-control" id="t-wilayah" placeholder="mis. Depok, Jakarta Selatan"></div>
+        </div>
+
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Data Pribadi</h6>
+        <div class="row">
+          <div class="col-md-8 mb-3"><label class="form-label">Alamat</label><input class="form-control" id="t-alamat"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Tanggal Lahir</label><input type="date" class="form-control" id="t-tgllahir"></div>
+        </div>
+        <div class="row">
+          <div class="col-md-4 mb-3"><label class="form-label">No. KTP</label><input class="form-control" id="t-ktp"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">Nama Bank</label><input class="form-control" id="t-bank"></div>
+          <div class="col-md-4 mb-3"><label class="form-label">No. Rekening</label><input class="form-control" id="t-norek"></div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3"><label class="form-label">Nama Pemilik Rekening</label><input class="form-control" id="t-namarek"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
@@ -79,28 +111,34 @@
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  if (session) { renderLayout({ active: 'technician', title: 'Master Teknisi' }); loadTechnicians(); }
-
-  let techModal, perfModal;
+  let techModal, perfModal, technicians = [];
+  if (session && session.role !== 'ADMIN') {
+    document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Teknisi hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
+  } else if (session) {
+    renderLayout({ active: 'technician', title: 'Master Teknisi' });
+    loadTechnicians();
+  }
 
   async function loadTechnicians() {
     const status = document.getElementById('f-status').value;
     const body = document.getElementById('technician-body');
     try {
       const d = await api('/api/technicians' + (status ? `?status=${status}` : ''));
-      if (!d.technicians.length) {
+      technicians = d.technicians;
+      if (!technicians.length) {
         body.innerHTML = '<tr><td colspan="6"><div class="empty-state"><i class="bi bi-person-badge"></i><p>Belum ada teknisi</p></div></td></tr>';
         return;
       }
-      body.innerHTML = d.technicians.map(t => `
+      body.innerHTML = technicians.map(t => `
         <tr>
           <td><b>${escapeHtml(t.nama)}</b></td>
-          <td>${escapeHtml(t.skill || '-')}</td>
+          <td class="text-muted small">${escapeHtml(t.spesialisasi || t.skill || '-')}</td>
+          <td class="text-muted small">${escapeHtml(t.wilayah_kerja || '-')}</td>
           <td>${escapeHtml(t.no_hp || '-')}</td>
           <td>${techStatusBadge(t.status)}</td>
-          <td class="text-muted small">${t.last_location_at ? fmtDate(t.last_location_at) : '-'}</td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-primary" onclick="viewPerformance(${t.id})"><i class="bi bi-graph-up"></i> Performa</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="openModal(${t.id})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-primary" onclick="viewPerformance(${t.id})"><i class="bi bi-graph-up"></i></button>
           </td>
         </tr>`).join('');
     } catch (e) {
@@ -108,27 +146,67 @@
     }
   }
 
-  function openModal() {
+  function openModal(id) {
     if (!techModal) techModal = new bootstrap.Modal(document.getElementById('techModal'));
-    ['t-nama','t-username','t-password','t-hp','t-email','t-skill'].forEach(id => document.getElementById(id).value = '');
+    const t = technicians.find(x => x.id === id) || {};
+    document.getElementById('tech-modal-title').textContent = id ? 'Edit Teknisi' : 'Tambah Teknisi';
+    document.getElementById('t-id').value = id || '';
+    document.getElementById('t-nama').value = t.nama || '';
+    document.getElementById('t-username').value = t.username || '';
+    document.getElementById('t-username').disabled = !!id;
+    document.getElementById('t-password').value = '';
+    document.getElementById('t-password').placeholder = id ? 'Kosongkan kalau tidak ganti password' : 'Minimal 6 karakter';
+    document.getElementById('pw-hint').textContent = id ? '(opsional)' : '*';
+    document.getElementById('t-hp').value = t.no_hp || '';
+    document.getElementById('t-email').value = t.email || '';
+    document.getElementById('t-skill').value = t.skill || '';
+    document.getElementById('t-spesialisasi').value = t.spesialisasi || '';
+    document.getElementById('t-sertifikasi').value = t.sertifikasi || '';
+    document.getElementById('t-wilayah').value = t.wilayah_kerja || '';
+    document.getElementById('t-alamat').value = t.alamat || '';
+    document.getElementById('t-tgllahir').value = t.tanggal_lahir ? t.tanggal_lahir.slice(0,10) : '';
+    document.getElementById('t-ktp').value = t.no_ktp || '';
+    document.getElementById('t-bank').value = t.nama_bank || '';
+    document.getElementById('t-norek').value = t.no_rekening || '';
+    document.getElementById('t-namarek').value = t.nama_rekening || '';
     techModal.show();
   }
 
-  async function saveTechnician() {
-    const payload = {
+  function collectProfile() {
+    return {
       nama: document.getElementById('t-nama').value.trim(),
-      username: document.getElementById('t-username').value.trim(),
-      password: document.getElementById('t-password').value,
       no_hp: document.getElementById('t-hp').value.trim(),
       email: document.getElementById('t-email').value.trim(),
       skill: document.getElementById('t-skill').value.trim(),
+      spesialisasi: document.getElementById('t-spesialisasi').value.trim(),
+      sertifikasi: document.getElementById('t-sertifikasi').value.trim(),
+      wilayah_kerja: document.getElementById('t-wilayah').value.trim(),
+      alamat: document.getElementById('t-alamat').value.trim(),
+      tanggal_lahir: document.getElementById('t-tgllahir').value || null,
+      no_ktp: document.getElementById('t-ktp').value.trim(),
+      nama_bank: document.getElementById('t-bank').value.trim(),
+      no_rekening: document.getElementById('t-norek').value.trim(),
+      nama_rekening: document.getElementById('t-namarek').value.trim(),
     };
-    if (!payload.nama || !payload.username || !payload.password) {
-      toast('Nama, username, dan password wajib diisi', 'error'); return;
-    }
+  }
+
+  async function saveTechnician() {
+    const id = document.getElementById('t-id').value;
+    const profile = collectProfile();
+    const password = document.getElementById('t-password').value;
+
+    if (!profile.nama) { toast('Nama wajib diisi', 'error'); return; }
+
     try {
-      await api('/api/technicians', { method: 'POST', body: JSON.stringify(payload) });
-      toast('Teknisi berhasil ditambahkan', 'success');
+      if (id) {
+        await api(`/api/technicians/${id}`, { method: 'PUT', body: JSON.stringify(profile) });
+        toast('Teknisi berhasil diupdate', 'success');
+      } else {
+        const username = document.getElementById('t-username').value.trim();
+        if (!username || !password) { toast('Username dan password wajib diisi', 'error'); return; }
+        await api('/api/technicians', { method: 'POST', body: JSON.stringify({ username, password, ...profile }) });
+        toast('Teknisi berhasil ditambahkan', 'success');
+      }
       techModal.hide();
       loadTechnicians();
     } catch (e) { toast(e.message, 'error'); }
@@ -145,13 +223,17 @@
       body.innerHTML = `
         <div class="d-flex align-items-center gap-3 mb-3">
           <div class="av bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:50px;height:50px;font-weight:700;font-size:18px;">${(t.nama||'?').slice(0,1).toUpperCase()}</div>
-          <div><h5 class="mb-0">${escapeHtml(t.nama)}</h5><span class="text-muted small">${escapeHtml(t.skill || '-')}</span></div>
+          <div><h5 class="mb-0">${escapeHtml(t.nama)}</h5><span class="text-muted small">${escapeHtml(t.spesialisasi || t.skill || '-')} · ${escapeHtml(t.wilayah_kerja || '-')}</span></div>
           <div class="ms-auto">${techStatusBadge(t.status)}</div>
         </div>
-        <div class="row g-2 text-center">
+        <div class="row g-2 text-center mb-3">
           <div class="col-4"><div class="border rounded-3 p-2"><div class="fw-bold fs-5">${p.total_order || 0}</div><div class="text-muted small">Total Order</div></div></div>
           <div class="col-4"><div class="border rounded-3 p-2"><div class="fw-bold fs-5 text-success">${p.total_selesai || 0}</div><div class="text-muted small">Selesai</div></div></div>
           <div class="col-4"><div class="border rounded-3 p-2"><div class="fw-bold fs-5">${p.avg_durasi_menit ? Math.round(p.avg_durasi_menit) + 'm' : '-'}</div><div class="text-muted small">Rata² Durasi</div></div></div>
+        </div>
+        <div class="small text-muted">
+          <div><b>Sertifikasi:</b> ${escapeHtml(t.sertifikasi || '-')}</div>
+          <div><b>No. HP:</b> ${escapeHtml(t.no_hp || '-')} &nbsp; <b>Email:</b> ${escapeHtml(t.email || '-')}</div>
         </div>
       `;
     } catch (e) {

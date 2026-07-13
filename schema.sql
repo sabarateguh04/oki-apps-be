@@ -10,6 +10,31 @@ CREATE DATABASE IF NOT EXISTS test
 USE test;
 
 -- ───────────────────────────────────────────────────────────
+-- RESET TOTAL — drop semua tabel oki_* lama (kalau ada) sebelum bikin
+-- ulang dari nol. INI MENGHAPUS SEMUA DATA yang sekarang ada di tabel-tabel
+-- ini. FOREIGN_KEY_CHECKS dimatikan sementara biar urutan drop-nya gak
+-- perlu dipikirin manual (aman, langsung dinyalain lagi di bawah).
+--
+-- ⚠️  JALANKAN INI SADAR-SADAR — kalau database `test` kamu udah ada data
+--     order/customer/teknisi yang penting, BACKUP DULU sebelum run file
+--     ini (mysqldump test > backup.sql), karena ini bukan migration
+--     tambah-kolom lagi, tapi reset total.
+-- ───────────────────────────────────────────────────────────
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS
+  oki_order_files,
+  oki_order_technicians,
+  oki_order_biaya,
+  oki_order_kebutuhan,
+  oki_order_timeline,
+  oki_technician_locations,
+  oki_orders,
+  oki_technicians,
+  oki_customers,
+  oki_users;
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ───────────────────────────────────────────────────────────
 -- 1. USERS — staff internal (admin, atasan/approver, finance, dispatcher)
 -- ───────────────────────────────────────────────────────────
 CREATE TABLE oki_users (
@@ -30,7 +55,13 @@ CREATE TABLE oki_customers (
   nama_perusahaan VARCHAR(200) NOT NULL,
   pic_nama        VARCHAR(150),
   pic_hp          VARCHAR(30),
+  pic_email       VARCHAR(150) NULL,
   alamat          TEXT,
+  provinsi        VARCHAR(100) NULL,
+  kabupaten_kota  VARCHAR(100) NULL,
+  kecamatan       VARCHAR(100) NULL,
+  kode_pos        VARCHAR(10)  NULL,
+  telp_perusahaan VARCHAR(30)  NULL,
   latitude        DECIMAL(10,7) NULL,
   longitude       DECIMAL(10,7) NULL,
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -49,6 +80,15 @@ CREATE TABLE oki_technicians (
   no_hp           VARCHAR(30),
   email           VARCHAR(150),
   skill           VARCHAR(150) NULL,            -- mis. "Elektrikal, HVAC"
+  spesialisasi    VARCHAR(200) NULL,
+  sertifikasi     VARCHAR(255) NULL,
+  wilayah_kerja   VARCHAR(150) NULL,
+  alamat          TEXT NULL,
+  tanggal_lahir   DATE NULL,
+  no_ktp          VARCHAR(30) NULL,
+  nama_bank       VARCHAR(100) NULL,
+  no_rekening     VARCHAR(50) NULL,
+  nama_rekening   VARCHAR(150) NULL,
   status          ENUM('OFFLINE','READY','ON_DUTY') NOT NULL DEFAULT 'OFFLINE',
   latitude        DECIMAL(10,7) NULL,
   longitude       DECIMAL(10,7) NULL,
@@ -75,10 +115,19 @@ CREATE TABLE oki_orders (
   priority        ENUM('LOW','MEDIUM','HIGH') NOT NULL DEFAULT 'MEDIUM',
   description     TEXT,
 
+  -- ── Lokasi & jadwal pengerjaan ──
+  wilayah                 VARCHAR(150) NULL,
+  alamat_detail           TEXT NULL,
+  lokasi_lat              DECIMAL(10,7) NULL,     -- titik lokasi trouble (bisa beda dari alamat customer)
+  lokasi_lng              DECIMAL(10,7) NULL,
+  tanggal_mulai           DATE NULL,
+  tanggal_selesai_target  DATE NULL,
+
   -- ── Status utama alur pekerjaan ──
-  -- NEW → (approval) → ASSIGNED → ON_THE_WAY → IN_PROGRESS → DONE
+  -- NEW → (approval) → ASSIGNED → ON_THE_WAY → IN_PROGRESS → DONE → CLOSED
+  -- (CLOSED = admin sudah cek semua bukti & biaya, tiket ditutup final)
   -- REJECTED / CANCELLED bisa kejadian di step manapun sebelum DONE.
-  status          ENUM('NEW','ASSIGNED','ON_THE_WAY','IN_PROGRESS','DONE','REJECTED','CANCELLED')
+  status          ENUM('NEW','ASSIGNED','ON_THE_WAY','IN_PROGRESS','DONE','CLOSED','REJECTED','CANCELLED')
                   NOT NULL DEFAULT 'NEW',
 
   -- ── CONDITION 1: Approval atasan ──
@@ -87,25 +136,19 @@ CREATE TABLE oki_orders (
   approved_at     DATETIME NULL,
   approval_note   VARCHAR(255) NULL,
 
-  -- ── CONDITION 2: Pre-bayar (material/equipment) — opsional ──
-  has_pre_bayar     TINYINT(1) NOT NULL DEFAULT 0,
-  pre_bayar_status  ENUM('PENDING','DONE') NOT NULL DEFAULT 'PENDING',
-  pre_bayar_amount  DECIMAL(14,2) NULL,
-  pre_bayar_paid_at DATETIME NULL,
+  -- CATATAN: pembayaran (pre-bayar material, transport, jasa teknisi, dll)
+  -- sekarang dilacak PER ITEM di tabel oki_order_biaya (kolom status/timing_bayar),
+  -- bukan lagi kolom lump-sum di sini. Lihat oki_order_biaya di bawah.
 
-  -- ── CONDITION 3: Transfer jasa teknisi (cuma relevan kalau timing = SEBELUM) ──
-  payment_timing              ENUM('SEBELUM','SESUDAH') NOT NULL DEFAULT 'SESUDAH',
-  jasa_teknisi_transfer_status ENUM('PENDING','DONE') NOT NULL DEFAULT 'PENDING',
-  jasa_teknisi_paid_at         DATETIME NULL,
-
-  -- ── Assignment teknisi ──
-  technician_id   INT NULL,
+  -- ── Assignment teknisi (siapa yg konfirmasi assign, kapan; teknisi
+  --    yang beneran ngerjain ada di tabel oki_order_technicians, bisa >1) ──
   assigned_by     INT NULL,
   assigned_at     DATETIME NULL,
 
-  -- ── Biaya ──
+  -- ── Biaya (ringkasan; rincian per item ada di oki_order_biaya) ──
   biaya_jasa      DECIMAL(14,2) NOT NULL DEFAULT 0,
   biaya_sparepart DECIMAL(14,2) NOT NULL DEFAULT 0,
+  biaya_transport DECIMAL(14,2) NOT NULL DEFAULT 0,
 
   -- ── Waktu (buat SLA & analitik) ──
   created_by      INT NOT NULL,
@@ -114,7 +157,6 @@ CREATE TABLE oki_orders (
   selesai_at      DATETIME NULL,                 -- diisi otomatis saat status → DONE
 
   FOREIGN KEY (customer_id)   REFERENCES oki_customers(id),
-  FOREIGN KEY (technician_id) REFERENCES oki_technicians(id),
   FOREIGN KEY (approved_by)   REFERENCES oki_users(id),
   FOREIGN KEY (assigned_by)   REFERENCES oki_users(id),
   FOREIGN KEY (created_by)    REFERENCES oki_users(id),
@@ -155,6 +197,108 @@ CREATE TABLE oki_order_timeline (
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (order_id) REFERENCES oki_orders(id) ON DELETE CASCADE,
   INDEX idx_order_time (order_id, created_at)
+) ENGINE=InnoDB;
+
+-- ───────────────────────────────────────────────────────────
+-- 7. KEBUTUHAN PRA-ASSIGN — barang/jasa yang wajib dibeli/ditransfer
+--    SEBELUM order boleh di-assign ke teknisi (mis. beli modem, sparepart
+--    khusus). Kalau ada baris di sini yang belum DIBELI, tombol Assign
+--    tetap terkunci.
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE oki_order_kebutuhan (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  order_id        INT NOT NULL,
+  nama_item       VARCHAR(200) NOT NULL,
+  qty             INT NOT NULL DEFAULT 1,
+  estimasi_harga  DECIMAL(14,2) NULL,
+  status          ENUM('PENDING','DIBELI') NOT NULL DEFAULT 'PENDING',
+  keterangan      VARCHAR(255) NULL,
+  bukti_url       VARCHAR(500) NULL,           -- bukti pembelian/transfer diupload Finance
+  dibeli_by       INT NULL,
+  dibeli_at       DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES oki_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (dibeli_by) REFERENCES oki_users(id)
+) ENGINE=InnoDB;
+
+-- ───────────────────────────────────────────────────────────
+-- 8. RINCIAN BIAYA — pecahan biaya per jenis (jasa/transport/material/lain)
+--    beserta timing bayarnya masing2.
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE oki_order_biaya (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  order_id        INT NOT NULL,
+  jenis           ENUM('JASA','TRANSPORT','MATERIAL','LAINNYA') NOT NULL DEFAULT 'LAINNYA',
+  deskripsi       VARCHAR(200) NULL,
+  jumlah          DECIMAL(14,2) NOT NULL DEFAULT 0,
+  timing_bayar    ENUM('SEBELUM','SESUDAH') NOT NULL DEFAULT 'SESUDAH',
+  -- Aturan pembayaran per item:
+  --   SEBELUM -> Finance boleh TF begitu atasan APPROVE (gak perlu nunggu task selesai)
+  --   SESUDAH -> Finance baru boleh TF setelah atasan APPROVE **dan** order.status = DONE
+  status          ENUM('PENDING','DONE') NOT NULL DEFAULT 'PENDING',
+  paid_by         INT NULL,
+  paid_at         DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES oki_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (paid_by) REFERENCES oki_users(id)
+) ENGINE=InnoDB;
+
+-- ───────────────────────────────────────────────────────────
+-- 9. TEKNISI PER ORDER (many-to-many). Satu order bisa dikerjakan LEBIH
+--    DARI SATU teknisi, dan ada alur tawaran-terima/tolak:
+--
+--    PLANNED  = admin nge-flag/nawarin ke 1 teknisi (boleh kapan aja,
+--               bahkan sebelum atasan approve / finance TF — cuma
+--               referensi awal buat Finance mau transfer ke siapa).
+--    ACCEPTED = teknisi TERIMA tawaran. Finance udah pasti tau harus
+--               TF ke siapa, tapi TF beneran baru boleh jalan kalau
+--               syarat lain (approval atasan, dst) juga udah lolos.
+--    REJECTED = teknisi TOLAK tawaran. Admin flag teknisi lain buat
+--               menggantikan (bikin baris PLANNED baru).
+--    ASSIGNED = FINAL — dikonfirmasi admin setelah semua syarat lolos
+--               (approval + kebutuhan dibeli + biaya SEBELUM lunas +
+--               minimal 1 teknisi ACCEPTED). Ini yang bikin teknisi
+--               boleh mulai kerja (ON_THE_WAY dst).
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE oki_order_technicians (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  order_id        INT NOT NULL,
+  technician_id   INT NOT NULL,
+  status          ENUM('PLANNED','ACCEPTED','REJECTED','ASSIGNED') NOT NULL DEFAULT 'PLANNED',
+  response_note   VARCHAR(255) NULL,      -- alasan/catatan waktu teknisi accept/reject
+  responded_at    DATETIME NULL,
+  assigned_by     INT NULL,
+  assigned_at     DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_order_tech (order_id, technician_id),
+  FOREIGN KEY (order_id) REFERENCES oki_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (technician_id) REFERENCES oki_technicians(id),
+  FOREIGN KEY (assigned_by) REFERENCES oki_users(id)
+) ENGINE=InnoDB;
+
+-- ───────────────────────────────────────────────────────────
+-- 10. FILE / BUKTI — satu tabel generik buat SEMUA jenis lampiran & bukti,
+--     boleh lebih dari satu file per kategori:
+--       LAMPIRAN  = lampiran pendukung waktu bikin order (bisa ada judul)
+--       BIAYA     = bukti transfer 1 item di oki_order_biaya (ref_id = id-nya)
+--       KEBUTUHAN = bukti pembelian 1 item kebutuhan pra-assign
+--                   (ref_id = id baris oki_order_kebutuhan)
+--       PEKERJAAN = bukti hasil kerja diupload TEKNISI sendiri (foto dsb),
+--                   uploaded_by_technician_id yang keisi, bukan uploaded_by
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE oki_order_files (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  order_id        INT NOT NULL,
+  kategori        ENUM('LAMPIRAN','BIAYA','KEBUTUHAN','PEKERJAAN') NOT NULL,
+  ref_id          INT NULL,
+  judul           VARCHAR(200) NULL,
+  file_url        VARCHAR(500) NOT NULL,
+  uploaded_by                INT NULL,   -- oki_users.id, kalau yang upload staff
+  uploaded_by_technician_id  INT NULL,   -- oki_technicians.id, kalau yang upload teknisi (salah satu selalu NULL)
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES oki_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by) REFERENCES oki_users(id),
+  FOREIGN KEY (uploaded_by_technician_id) REFERENCES oki_technicians(id)
 ) ENGINE=InnoDB;
 
 -- ───────────────────────────────────────────────────────────

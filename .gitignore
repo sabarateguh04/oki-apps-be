@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# File upload user (bukti transfer) - jangan di-commit, cuma data runtime
+uploads/bukti/*
+!uploads/bukti/.gitkeep
+
 # Environment variables (jangan pernah ke-push, isinya credential DB)
 .env
 .env.local
