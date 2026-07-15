@@ -60,26 +60,28 @@
               </div>
 
               <hr>
-              <h6 class="fw-bold mb-3"><i class="bi bi-geo-alt"></i> Lokasi Pekerjaan</h6>
-              <div class="row">
-                <div class="col-md-6 mb-3">
-                  <label class="form-label">Wilayah</label>
-                  <input type="text" class="form-control" id="wilayah" placeholder="mis. Depok, Jawa Barat">
+              <h6 class="fw-bold mb-3"><i class="bi bi-geo-alt"></i> Lokasi Pekerjaan (Master Site)</h6>
+              <div class="mb-3">
+                <label class="form-label">Site *</label>
+                <select class="form-select" id="site_id" required onchange="onSiteChange()" disabled>
+                  <option value="">Pilih customer dulu...</option>
+                </select>
+                <div class="form-text">
+                  Semua titik lokasi wajib terdaftar di Master Site — gak ada input alamat/koordinat manual di sini.
+                  Site yang dicari belum ada? <a href="site" target="_blank">Tambah dulu di Master Site <i class="bi bi-box-arrow-up-right"></i></a>
                 </div>
-                <div class="col-md-6 mb-3">
-                  <label class="form-label">Titik Lokasi Trouble (lat, lng)</label>
-                  <div class="d-flex gap-2">
-                    <input type="text" class="form-control" id="lokasi_lat" placeholder="Latitude" readonly>
-                    <input type="text" class="form-control" id="lokasi_lng" placeholder="Longitude" readonly>
+              </div>
+
+              <div id="site-preview" class="d-none">
+                <div class="alert alert-light border">
+                  <div class="row g-2">
+                    <div class="col-md-6"><b>Alamat:</b> <span id="sp-alamat"></span></div>
+                    <div class="col-md-3"><b>Status Projek:</b> <span id="sp-status-projek"></span></div>
+                    <div class="col-md-3"><b>Status Gangguan:</b> <span id="sp-status-gangguan"></span></div>
                   </div>
                 </div>
+                <div id="trouble-map" class="mb-3"></div>
               </div>
-              <div class="mb-2">
-                <label class="form-label">Alamat Detail Lokasi Trouble</label>
-                <textarea class="form-control" id="alamat_detail" rows="2" placeholder="Alamat lengkap titik trouble (bisa beda dari alamat kantor customer)"></textarea>
-              </div>
-              <div class="form-text mb-2">Klik peta buat nandain titik lokasi trouble — otomatis ke-fill di atas.</div>
-              <div id="trouble-map" class="mb-3"></div>
 
               <hr>
               <h6 class="fw-bold mb-3"><i class="bi bi-calendar-range"></i> Jadwal Pengerjaan</h6>
@@ -149,6 +151,8 @@
 <script>
   const session = requireAuth(['staff']);
   let customers = [];
+  let sites = [];
+  let selectedSite = null;
   let map, marker;
   let biayaSeq = 0;
   let kebutuhanSeq = 0;
@@ -159,7 +163,6 @@
   } else if (session) {
     renderLayout({ active: 'orders', title: 'Buat Order Baru' });
     loadCustomers();
-    initMap();
     addBiayaRow();
   }
 
@@ -180,28 +183,71 @@
     }
   }
 
-  function onCustomerChange() {
-    const c = customers.find(x => x.id === Number(document.getElementById('customer_id').value));
-    if (c && c.latitude && c.longitude) {
-      setTroublePoint(Number(c.latitude), Number(c.longitude));
+  /* Ganti customer -> reset & muat ulang daftar site MILIK customer itu aja
+     (dropdown site-nya kefilter otomatis, gak nunjukin site customer lain). */
+  async function onCustomerChange() {
+    const siteSel = document.getElementById('site_id');
+    const customerId = document.getElementById('customer_id').value;
+    selectedSite = null;
+    document.getElementById('site-preview').classList.add('d-none');
+
+    if (!customerId) {
+      siteSel.disabled = true;
+      siteSel.innerHTML = '<option value="">Pilih customer dulu...</option>';
+      return;
+    }
+
+    siteSel.disabled = true;
+    siteSel.innerHTML = '<option value="">Memuat site...</option>';
+    try {
+      const d = await api(`/api/sites?customer_id=${customerId}`);
+      sites = d.sites;
+      if (!sites.length) {
+        siteSel.innerHTML = '<option value="">Belum ada site terdaftar buat customer ini</option>';
+        toast('Customer ini belum punya site di Master Site — tambah dulu sebelum bisa bikin order', 'error');
+        return;
+      }
+      siteSel.disabled = false;
+      siteSel.innerHTML = '<option value="">Pilih site...</option>' +
+        sites.map(s => `<option value="${s.id}">${escapeHtml(s.kode_site)} — ${escapeHtml(s.site_name)}</option>`).join('');
+    } catch (e) {
+      siteSel.innerHTML = '<option value="">Gagal memuat site</option>';
+      toast(e.message, 'error');
     }
   }
 
-  function initMap() {
-    map = L.map('trouble-map').setView([-6.4, 106.8], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
-    map.on('click', (e) => setTroublePoint(e.latlng.lat, e.latlng.lng));
-    setTimeout(() => map.invalidateSize(), 300);
-    window.addEventListener('resize', () => map.invalidateSize());
+  function onSiteChange() {
+    const siteId = Number(document.getElementById('site_id').value);
+    selectedSite = sites.find(s => s.id === siteId) || null;
+    const preview = document.getElementById('site-preview');
+
+    if (!selectedSite) { preview.classList.add('d-none'); return; }
+
+    document.getElementById('sp-alamat').textContent = selectedSite.alamat_detail || [selectedSite.kelurahan, selectedSite.kecamatan, selectedSite.kota, selectedSite.provinsi].filter(Boolean).join(', ') || '-';
+    document.getElementById('sp-status-projek').textContent = selectedSite.status_projek === 'ACTIVE' ? 'Active' : 'Non Active';
+    document.getElementById('sp-status-gangguan').textContent = { BERJALAN:'Berjalan', GANGGUAN:'Gangguan', MAINTENANCE:'Maintenance' }[selectedSite.status_gangguan] || selectedSite.status_gangguan;
+    preview.classList.remove('d-none');
+
+    if (selectedSite.status_projek !== 'ACTIVE') toast('Site ini berstatus Non Active — pastikan memang mau bikin order di sini', 'error');
+    if (selectedSite.latitude && selectedSite.longitude) {
+      setTimeout(() => showSitePoint(Number(selectedSite.latitude), Number(selectedSite.longitude)), 50);
+    }
   }
 
-  function setTroublePoint(lat, lng) {
-    document.getElementById('lokasi_lat').value = lat.toFixed(7);
-    document.getElementById('lokasi_lng').value = lng.toFixed(7);
+  /* Peta di sini CUMA nampilin lokasi site yang dipilih — read-only, gak
+     ada klik buat set titik lagi, karena titik lokasi WAJIB dari Master
+     Site (lihat form site.html buat nambah/ubah titiknya). */
+  function showSitePoint(lat, lng) {
+    if (!map) {
+      map = L.map('trouble-map').setView([lat, lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+    } else {
+      map.setView([lat, lng], 15);
+    }
     if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng]).addTo(map);
-    map.setView([lat, lng], 14);
+    setTimeout(() => map.invalidateSize(), 200);
   }
 
   /* ── Rincian biaya (jasa/transport/material/lainnya) ── */
@@ -310,16 +356,15 @@
       const biayaSparepart = rincianBiaya.filter(r => r.jenis === 'MATERIAL' || r.jenis === 'LAINNYA').reduce((a,b)=>a+b.jumlah,0);
       const customerId = document.getElementById('customer_id').value;
       if (!customerId) throw new Error('Pilih customer dulu');
+      const siteId = document.getElementById('site_id').value;
+      if (!siteId) throw new Error('Pilih site (lokasi pekerjaan) dulu — kalau belum ada, tambahkan dulu di Master Site');
 
       const fd = new FormData();
       fd.append('customer_id', customerId);
+      fd.append('site_id', siteId);
       fd.append('category', document.getElementById('category').value);
       fd.append('priority', document.getElementById('priority').value);
       fd.append('description', document.getElementById('description').value.trim());
-      fd.append('wilayah', document.getElementById('wilayah').value.trim());
-      fd.append('alamat_detail', document.getElementById('alamat_detail').value.trim());
-      fd.append('lokasi_lat', document.getElementById('lokasi_lat').value || '');
-      fd.append('lokasi_lng', document.getElementById('lokasi_lng').value || '');
       fd.append('tanggal_mulai', document.getElementById('tanggal_mulai').value || '');
       fd.append('tanggal_selesai_target', document.getElementById('tanggal_selesai_target').value || '');
       fd.append('biaya_jasa', biayaJasa);

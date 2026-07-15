@@ -12,6 +12,7 @@ const customerRoute   = require('./routes/customer.route');
 const technicianRoute = require('./routes/technician.route');
 const orderRoute      = require('./routes/order.route');
 const dashboardRoute  = require('./routes/dashboard.route');
+const siteRoute       = require('./routes/site.route');
 
 const app = express();
 const PORT = process.env.PORT || 3010;
@@ -24,6 +25,7 @@ app.use('/api/customers', customerRoute);
 app.use('/api/technicians', technicianRoute);
 app.use('/api/orders', orderRoute);
 app.use('/api/dashboard', dashboardRoute);
+app.use('/api/sites', siteRoute);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 

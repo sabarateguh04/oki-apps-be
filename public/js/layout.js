@@ -8,6 +8,7 @@ const ALL_STAFF_NAV = [
   { key: 'orders',    href: 'orders',     icon: 'bi-list-task',    label: 'Data Order',       roles: ['ADMIN','ATASAN','FINANCE','DISPATCHER'] },
   { key: 'approval',  href: 'approval',   icon: 'bi-check2-square',label: 'Approval Order',   roles: ['ATASAN'] },
   { key: 'customer',  href: 'customer',   icon: 'bi-people',       label: 'Master Customer',  roles: ['ADMIN'] },
+  { key: 'site',      href: 'site',       icon: 'bi-geo-alt',      label: 'Master Site',      roles: ['ADMIN'] },
   { key: 'technician',href: 'technician', icon: 'bi-person-badge', label: 'Master Teknisi',   roles: ['ADMIN'] },
 ];
 

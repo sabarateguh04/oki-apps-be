@@ -29,6 +29,7 @@ DROP TABLE IF EXISTS
   oki_order_timeline,
   oki_technician_locations,
   oki_orders,
+  oki_customer_sites,
   oki_technicians,
   oki_customers,
   oki_users;
@@ -65,6 +66,38 @@ CREATE TABLE oki_customers (
   latitude        DECIMAL(10,7) NULL,
   longitude       DECIMAL(10,7) NULL,
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- ───────────────────────────────────────────────────────────
+-- 2b. CUSTOMER_SITES — titik lokasi kerja yang TERDAFTAR per customer.
+-- Ini yang jadi SATU-SATUNYA sumber titik lokasi buat order (lihat kolom
+-- site_id di oki_orders) — gak ada lagi input lat/lng/alamat manual pas
+-- bikin order, semua wajib pilih dari sini biar datanya konsisten &
+-- gak typo/salah titik tiap kali ada tiket baru ke lokasi yang sama.
+-- kode_site UNIQUE per customer (bukan global) — jadi 2 customer beda
+-- boleh aja kebetulan pakai kode yang sama, tapi 1 customer gak boleh
+-- punya 2 site dengan kode sama.
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE oki_customer_sites (
+  id                  INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id         INT NOT NULL,
+  kode_site           VARCHAR(50) NOT NULL,
+  site_name           VARCHAR(150) NOT NULL,
+  kategori            ENUM('PREVENTIVE','CORRECTIVE','INSTALLATION','INSPECTION') NOT NULL DEFAULT 'CORRECTIVE',
+  latitude            DECIMAL(10,7) NULL,
+  longitude           DECIMAL(10,7) NULL,
+  provinsi            VARCHAR(100) NULL,
+  kota                VARCHAR(100) NULL,
+  kecamatan           VARCHAR(100) NULL,
+  kelurahan           VARCHAR(100) NULL,
+  alamat_detail       TEXT NULL,
+  keterangan_pekerjaan VARCHAR(255) NULL,
+  status_projek       ENUM('ACTIVE','NON_ACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  status_gangguan     ENUM('BERJALAN','GANGGUAN','MAINTENANCE') NOT NULL DEFAULT 'BERJALAN',
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (customer_id) REFERENCES oki_customers(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_customer_kode_site (customer_id, kode_site),
+  INDEX idx_site_customer (customer_id)
 ) ENGINE=InnoDB;
 
 -- ───────────────────────────────────────────────────────────
@@ -110,12 +143,18 @@ CREATE TABLE oki_orders (
   id              INT AUTO_INCREMENT PRIMARY KEY,
   order_no        VARCHAR(20) NOT NULL UNIQUE,      -- ORD-00001
   customer_id     INT NOT NULL,
+  site_id         INT NULL,        -- WAJIB diisi dari oki_customer_sites (lihat catatan di bawah)
 
   category        ENUM('PREVENTIVE','CORRECTIVE','INSTALLATION','INSPECTION') NOT NULL DEFAULT 'CORRECTIVE',
   priority        ENUM('LOW','MEDIUM','HIGH') NOT NULL DEFAULT 'MEDIUM',
   description     TEXT,
 
   -- ── Lokasi & jadwal pengerjaan ──
+  -- wilayah/alamat_detail/lokasi_lat/lokasi_lng di-SALIN otomatis dari
+  -- oki_customer_sites pas order dibuat (server yang isi, bukan input
+  -- manual admin) — disimpan di sini juga sebagai SNAPSHOT, supaya kalau
+  -- suatu saat data site-nya diedit/berubah, riwayat order lama tetap
+  -- nunjukin lokasi yang benar waktu itu (gak ikut berubah retroaktif).
   wilayah                 VARCHAR(150) NULL,
   alamat_detail           TEXT NULL,
   lokasi_lat              DECIMAL(10,7) NULL,     -- titik lokasi trouble (bisa beda dari alamat customer)
@@ -160,6 +199,7 @@ CREATE TABLE oki_orders (
   FOREIGN KEY (approved_by)   REFERENCES oki_users(id),
   FOREIGN KEY (assigned_by)   REFERENCES oki_users(id),
   FOREIGN KEY (created_by)    REFERENCES oki_users(id),
+  FOREIGN KEY (site_id)       REFERENCES oki_customer_sites(id),
 
   INDEX idx_status (status),
   INDEX idx_approval (approval_status),
@@ -313,6 +353,10 @@ INSERT INTO oki_users (username, password, nama, role) VALUES
 
 INSERT INTO oki_customers (nama_perusahaan, pic_nama, pic_hp, alamat) VALUES
   ('PT ABC Indonesia', 'Budi Santoso', '081234567890', 'Jl. Margonda Raya No.100 Depok');
+
+INSERT INTO oki_customer_sites
+  (customer_id, kode_site, site_name, kategori, latitude, longitude, provinsi, kota, kecamatan, kelurahan, alamat_detail, keterangan_pekerjaan, status_projek, status_gangguan) VALUES
+  (1, 'DPK-01', 'Kantor Cabang Depok', 'INSTALLATION', -6.3728, 106.8317, 'Jawa Barat', 'Depok', 'Beji', 'Kemiri Muka', 'Jl. Margonda Raya No.100, Kemiri Muka, Beji, Depok', 'Pemasangan jaringan internet', 'ACTIVE', 'BERJALAN');
 
 INSERT INTO oki_technicians (username, password, nama, no_hp, email, skill) VALUES
   ('teknisi1', '$2b$10$.gI0Q57pTsFDt0cbQBpDb.qq2m6KPafkaQOBaQwnpp1uIbUcXnM62', 'Andi Wijaya', '081212121212', 'andi@email.com', 'Elektrikal');
