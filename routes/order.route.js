@@ -59,9 +59,11 @@ async function saveFiles(conn, orderId, kategori, files, uploadedBy, refId = nul
 async function getOrderWithEligibility(orderId) {
   const [rows] = await pool.query(
     `SELECT o.*, c.nama_perusahaan, c.pic_nama, c.pic_hp, c.alamat AS customer_alamat,
-            c.latitude AS customer_lat, c.longitude AS customer_lng
+            c.latitude AS customer_lat, c.longitude AS customer_lng,
+            s.kode_site, s.site_name, s.status_projek AS site_status_projek, s.status_gangguan AS site_status_gangguan
      FROM oki_orders o
      JOIN oki_customers c ON c.id = o.customer_id
+     LEFT JOIN oki_customer_sites s ON s.id = o.site_id
      WHERE o.id = ?`,
     [orderId],
   );
@@ -244,6 +246,7 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
   const parseJson = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } };
 
   const customer_id = b.customer_id;
+  const site_id = b.site_id;
   const rincian_biaya = parseJson(b.rincian_biaya, []);
   const kebutuhan_pra_assign = parseJson(b.kebutuhan_pra_assign, []);
   const judulList = Array.isArray(b.judul) ? b.judul : (b.judul ? [b.judul] : []);
@@ -251,6 +254,26 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
   if (!customer_id) {
     return res.status(400).json({ success: false, message: 'customer_id wajib diisi' });
   }
+  if (!site_id) {
+    return res.status(400).json({ success: false, message: 'site_id wajib diisi — pilih lokasi dari Master Site, gak bisa input manual' });
+  }
+
+  // Titik lokasi SELALU diambil dari Master Site yang terdaftar (server yang
+  // nentuin, bukan dari input client) — ini yang mastiin "gak ada isi manual"
+  // beneran ditegakkan, bukan cuma disembunyikan di UI doang.
+  const [[site]] = await pool.query(`SELECT * FROM oki_customer_sites WHERE id = ?`, [site_id]);
+  if (!site) {
+    return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+  }
+  if (Number(site.customer_id) !== Number(customer_id)) {
+    return res.status(400).json({ success: false, message: 'Site yang dipilih bukan milik customer ini' });
+  }
+  if (!site.latitude || !site.longitude) {
+    return res.status(400).json({ success: false, message: 'Site ini belum punya titik koordinat — lengkapi dulu di Master Site' });
+  }
+
+  const wilayah = [site.kota, site.provinsi].filter(Boolean).join(', ') || site.site_name;
+  const alamat_detail = site.alamat_detail || site.site_name;
 
   const conn = await pool.getConnection();
   try {
@@ -258,13 +281,13 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
 
     const [result] = await conn.query(
       `INSERT INTO oki_orders
-         (order_no, customer_id, category, priority, description,
+         (order_no, customer_id, site_id, category, priority, description,
           wilayah, alamat_detail, lokasi_lat, lokasi_lng, tanggal_mulai, tanggal_selesai_target,
           biaya_jasa, biaya_sparepart, biaya_transport, created_by)
-       VALUES ('TEMP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ('TEMP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        customer_id, b.category || 'CORRECTIVE', b.priority || 'MEDIUM', b.description || null,
-        b.wilayah || null, b.alamat_detail || null, b.lokasi_lat || null, b.lokasi_lng || null,
+        customer_id, site_id, b.category || site.kategori || 'CORRECTIVE', b.priority || 'MEDIUM', b.description || null,
+        wilayah, alamat_detail, site.latitude, site.longitude,
         b.tanggal_mulai || null, b.tanggal_selesai_target || null,
         b.biaya_jasa || 0, b.biaya_sparepart || 0, b.biaya_transport || 0, req.user.id,
       ],
