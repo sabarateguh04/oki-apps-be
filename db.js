@@ -11,6 +11,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   dateStrings: true, // biar DATETIME balik sebagai string, bukan objek Date (konsisten dgn frontend)
+  timezone: '+07:00',
 });
 
 module.exports = pool;
