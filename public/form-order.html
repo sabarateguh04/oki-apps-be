@@ -6,7 +6,6 @@
 <title>Form Order — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 <style>
   .item-row{ background:#f8f9fb; border-radius:10px; padding:10px; margin-bottom:8px; }
@@ -63,6 +62,7 @@
               <h6 class="fw-bold mb-3"><i class="bi bi-geo-alt"></i> Lokasi Pekerjaan (Master Site)</h6>
               <div class="mb-3">
                 <label class="form-label">Site *</label>
+                <input type="text" class="form-control form-control-sm mb-2" id="site-search" placeholder="Cari kode/nama site..." disabled oninput="filterSiteOptions()">
                 <select class="form-select" id="site_id" required onchange="onSiteChange()" disabled>
                   <option value="">Pilih customer dulu...</option>
                 </select>
@@ -78,6 +78,9 @@
                     <div class="col-md-6"><b>Alamat:</b> <span id="sp-alamat"></span></div>
                     <div class="col-md-3"><b>Status Projek:</b> <span id="sp-status-projek"></span></div>
                     <div class="col-md-3"><b>Status Gangguan:</b> <span id="sp-status-gangguan"></span></div>
+                  </div>
+                  <div class="row g-2 mt-1">
+                    <div class="col-12"><b>No. Order:</b> <span id="sp-orderno" class="text-primary fw-semibold"></span> <span class="text-muted small">(otomatis mengikuti kode site)</span></div>
                   </div>
                 </div>
                 <div id="trouble-map" class="mb-3"></div>
@@ -145,7 +148,7 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBsPfZeUe8Jm5Shr3ToevC39SyzO8lAPvE&libraries=places&language=id&region=ID"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
@@ -187,17 +190,21 @@
      (dropdown site-nya kefilter otomatis, gak nunjukin site customer lain). */
   async function onCustomerChange() {
     const siteSel = document.getElementById('site_id');
+    const siteSearch = document.getElementById('site-search');
     const customerId = document.getElementById('customer_id').value;
     selectedSite = null;
     document.getElementById('site-preview').classList.add('d-none');
+    siteSearch.value = '';
 
     if (!customerId) {
       siteSel.disabled = true;
+      siteSearch.disabled = true;
       siteSel.innerHTML = '<option value="">Pilih customer dulu...</option>';
       return;
     }
 
     siteSel.disabled = true;
+    siteSearch.disabled = true;
     siteSel.innerHTML = '<option value="">Memuat site...</option>';
     try {
       const d = await api(`/api/sites?customer_id=${customerId}`);
@@ -208,11 +215,40 @@
         return;
       }
       siteSel.disabled = false;
-      siteSel.innerHTML = '<option value="">Pilih site...</option>' +
-        sites.map(s => `<option value="${s.id}">${escapeHtml(s.kode_site)} — ${escapeHtml(s.site_name)}</option>`).join('');
+      siteSearch.disabled = false;
+      filterSiteOptions();
     } catch (e) {
       siteSel.innerHTML = '<option value="">Gagal memuat site</option>';
       toast(e.message, 'error');
+    }
+  }
+
+  /* Filter dropdown site berdasarkan kode/nama site yang diketik di kotak
+     pencarian — biar gak perlu scroll manual kalau site-nya udah banyak.
+     Dipanggil juga saat pertama kali daftar site dimuat (search kosong). */
+  function filterSiteOptions() {
+    const q = document.getElementById('site-search').value.trim().toLowerCase();
+    const siteSel = document.getElementById('site_id');
+    const currentVal = siteSel.value;
+    const filtered = q
+      ? sites.filter(s => `${s.kode_site} ${s.site_name}`.toLowerCase().includes(q))
+      : sites;
+
+    if (!filtered.length) {
+      siteSel.innerHTML = '<option value="">Tidak ada site yang cocok</option>';
+      selectedSite = null;
+      document.getElementById('site-preview').classList.add('d-none');
+      return;
+    }
+
+    siteSel.innerHTML = '<option value="">Pilih site...</option>' +
+      filtered.map(s => `<option value="${s.id}">${escapeHtml(s.kode_site)} — ${escapeHtml(s.site_name)}</option>`).join('');
+
+    if (filtered.some(s => String(s.id) === currentVal)) {
+      siteSel.value = currentVal;
+    } else if (currentVal) {
+      selectedSite = null;
+      document.getElementById('site-preview').classList.add('d-none');
     }
   }
 
@@ -226,6 +262,9 @@
     document.getElementById('sp-alamat').textContent = selectedSite.alamat_detail || [selectedSite.kelurahan, selectedSite.kecamatan, selectedSite.kota, selectedSite.provinsi].filter(Boolean).join(', ') || '-';
     document.getElementById('sp-status-projek').textContent = selectedSite.status_projek === 'ACTIVE' ? 'Active' : 'Non Active';
     document.getElementById('sp-status-gangguan').textContent = { BERJALAN:'Berjalan', GANGGUAN:'Gangguan', MAINTENANCE:'Maintenance' }[selectedSite.status_gangguan] || selectedSite.status_gangguan;
+    // Preview format nomor order — nomor urut sebenarnya (4 digit terakhir)
+    // ditentukan & dijamin unik oleh server saat order disimpan.
+    document.getElementById('sp-orderno').textContent = `ORD-${selectedSite.kode_site}-0001`;
     preview.classList.remove('d-none');
 
     if (selectedSite.status_projek !== 'ACTIVE') toast('Site ini berstatus Non Active — pastikan memang mau bikin order di sini', 'error');
@@ -238,16 +277,15 @@
      ada klik buat set titik lagi, karena titik lokasi WAJIB dari Master
      Site (lihat form site.html buat nambah/ubah titiknya). */
   function showSitePoint(lat, lng) {
+    const pos = { lat, lng };
     if (!map) {
-      map = L.map('trouble-map').setView([lat, lng], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
+      map = new google.maps.Map(document.getElementById('trouble-map'), { center: pos, zoom: 15 });
     } else {
-      map.setView([lat, lng], 15);
+      map.setCenter(pos);
+      map.setZoom(15);
+      google.maps.event.trigger(map, 'resize');
     }
-    if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng]).addTo(map);
-    setTimeout(() => map.invalidateSize(), 200);
+    if (marker) marker.setPosition(pos); else marker = new google.maps.Marker({ position: pos, map });
   }
 
   /* ── Rincian biaya (jasa/transport/material/lainnya) ── */

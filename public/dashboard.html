@@ -6,7 +6,6 @@
 <title>Dashboard — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -80,7 +79,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBsPfZeUe8Jm5Shr3ToevC39SyzO8lAPvE&libraries=places&language=id&region=ID"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
@@ -181,25 +180,27 @@
   }
 
   function initMap() {
-    map = L.map('tech-map').setView([-6.4, 106.8], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
-    // PENTING: kalau container map di-render sebelum layout/topbar selesai
-    // di-inject, Leaflet salah hitung ukuran container -> peta jadi blank/
-    // abu-abu sampai user resize window. invalidateSize() maksa Leaflet
-    // hitung ulang setelah DOM benar-benar stabil.
-    setTimeout(() => map.invalidateSize(), 300);
-    window.addEventListener('resize', () => map.invalidateSize());
+    map = new google.maps.Map(document.getElementById('tech-map'), {
+      center: { lat: -6.4, lng: 106.8 },
+      zoom: 11,
+    });
+    // Container map kadang belum punya ukuran final pas layout/topbar
+    // masih di-inject -> maksa Google Maps hitung ulang ukuran setelah
+    // DOM stabil (equivalent Leaflet punya invalidateSize()).
+    setTimeout(() => google.maps.event.trigger(map, 'resize'), 300);
+    window.addEventListener('resize', () => google.maps.event.trigger(map, 'resize'));
   }
 
   function techIcon(status) {
     const color = status === 'ON_DUTY' ? '#fd7e14' : '#198754';
-    return L.divIcon({
-      className: '',
-      html: `<div style="width:26px;height:26px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div>`,
-      iconSize: [26, 26], iconAnchor: [13, 13],
-    });
+    return {
+      path: google.maps.SymbolPath.CIRCLE,
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: '#fff',
+      strokeWeight: 3,
+      scale: 10,
+    };
   }
 
   function renderTechLocations(rows) {
@@ -207,7 +208,7 @@
     const seen = new Set();
     rows.forEach(t => { upsertMarker(t); seen.add(String(t.id)); });
     Object.keys(mapMarkers).forEach(id => {
-      if (!seen.has(id)) { map.removeLayer(mapMarkers[id]); delete mapMarkers[id]; }
+      if (!seen.has(id)) { mapMarkers[id].setMap(null); delete mapMarkers[id]; }
     });
   }
 
@@ -215,11 +216,16 @@
     const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
     if (!lat && !lng) return;
     const id = String(t.id);
+    const pos = { lat, lng };
     if (mapMarkers[id]) {
-      mapMarkers[id].setLatLng([lat, lng]);
+      mapMarkers[id].setPosition(pos);
+      mapMarkers[id].setIcon(techIcon(t.status));
     } else {
-      const marker = L.marker([lat, lng], { icon: techIcon(t.status) }).addTo(map);
-      if (t.nama) marker.bindPopup(`<b>${escapeHtml(t.nama)}</b><br>${t.status || ''}`);
+      const marker = new google.maps.Marker({ position: pos, map, icon: techIcon(t.status) });
+      if (t.nama) {
+        const info = new google.maps.InfoWindow({ content: `<b>${escapeHtml(t.nama)}</b><br>${t.status || ''}` });
+        marker.addListener('click', () => info.open(map, marker));
+      }
       mapMarkers[id] = marker;
     }
   }

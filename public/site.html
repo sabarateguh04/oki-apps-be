@@ -6,7 +6,6 @@
 <title>Master Site — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -73,9 +72,10 @@
           <input class="form-control" id="s-nama" placeholder="mis. Kantor Cabang Depok">
         </div>
 
-        <h6 class="fw-bold text-muted small text-uppercase mb-2">Titik Lokasi (klik peta buat set koordinat)</h6>
+        <h6 class="fw-bold text-muted small text-uppercase mb-2">Titik Lokasi (cari lokasi atau klik peta — alamat terisi otomatis)</h6>
+        <input type="text" class="form-control mb-2" id="site-map-search" placeholder="Cari lokasi di Google Maps...">
         <div id="site-map" style="height:240px;border-radius:12px;border:1px solid #dee2e6;"></div>
-        <div class="form-text mb-3" id="latlng-hint">Belum dipilih — klik di peta</div>
+        <div class="form-text mb-3" id="latlng-hint">Belum dipilih — klik di peta atau cari lokasi</div>
 
         <div class="row">
           <div class="col-md-3 mb-3"><label class="form-label">Provinsi</label><input class="form-control" id="s-provinsi"></div>
@@ -83,6 +83,10 @@
           <div class="col-md-3 mb-3"><label class="form-label">Kecamatan</label><input class="form-control" id="s-kecamatan"></div>
           <div class="col-md-3 mb-3"><label class="form-label">Kelurahan</label><input class="form-control" id="s-kelurahan"></div>
         </div>
+        <div class="row">
+          <div class="col-md-3 mb-3"><label class="form-label">Kode Pos</label><input class="form-control" id="s-kodepos"></div>
+        </div>
+        <div class="form-text mb-3">Provinsi, kota, kecamatan, kelurahan &amp; kode pos otomatis terisi dari titik yang dipilih di peta — silakan koreksi manual kalau hasilnya kurang lengkap/tepat.</div>
 
         <div class="mb-3">
           <label class="form-label">Alamat Detail</label>
@@ -121,12 +125,12 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBsPfZeUe8Jm5Shr3ToevC39SyzO8lAPvE&libraries=places&language=id&region=ID"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  let modal, sites = [], customers = [], siteMap, siteMarker, searchTimer;
+  let modal, sites = [], customers = [], siteMap, siteMarker, searchTimer, siteAutocomplete;
 
   if (session && session.role !== 'ADMIN') {
     document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Site hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
@@ -134,6 +138,7 @@
     renderLayout({ active: 'site', title: 'Master Site' });
     loadCustomersForFilterAndForm();
     loadSites();
+    initSiteAutocomplete();
   }
 
   async function loadCustomersForFilterAndForm() {
@@ -203,33 +208,105 @@
     document.getElementById('s-kecamatan').value = s.kecamatan || '';
     document.getElementById('s-kelurahan').value = s.kelurahan || '';
     document.getElementById('s-alamat').value = s.alamat_detail || '';
+    document.getElementById('s-kodepos').value = s.kode_pos || '';
     document.getElementById('s-keterangan').value = s.keterangan_pekerjaan || '';
     document.getElementById('s-status-projek').value = s.status_projek || 'ACTIVE';
     document.getElementById('s-status-gangguan').value = s.status_gangguan || 'BERJALAN';
 
     modal.show();
     setTimeout(() => {
-      initSiteMap();
+      if (!siteMap) initSiteMap();
+      google.maps.event.trigger(siteMap, 'resize');
       const lat = s.latitude ? Number(s.latitude) : null;
       const lng = s.longitude ? Number(s.longitude) : null;
-      if (lat && lng) setSitePoint(lat, lng); else document.getElementById('latlng-hint').textContent = 'Belum dipilih — klik di peta';
+      if (lat && lng) {
+        setSitePoint(lat, lng, false);
+      } else {
+        if (siteMarker) { siteMarker.setMap(null); siteMarker = null; }
+        siteMap.setCenter({ lat: -6.4, lng: 106.8 });
+        siteMap.setZoom(11);
+        siteMap.dataset_lat = null;
+        siteMap.dataset_lng = null;
+        document.getElementById('latlng-hint').textContent = 'Belum dipilih — klik di peta atau cari lokasi';
+      }
     }, 250);
   }
 
   function initSiteMap() {
-    if (siteMap) { siteMap.remove(); siteMap = null; siteMarker = null; }
-    siteMap = L.map('site-map').setView([-6.4, 106.8], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(siteMap);
-    siteMap.on('click', (e) => setSitePoint(e.latlng.lat, e.latlng.lng));
-    siteMap.invalidateSize();
+    siteMap = new google.maps.Map(document.getElementById('site-map'), {
+      center: { lat: -6.4, lng: 106.8 },
+      zoom: 11,
+    });
+    siteMap.addListener('click', (e) => setSitePoint(e.latLng.lat(), e.latLng.lng(), true));
   }
 
-  function setSitePoint(lat, lng) {
+  /* Set titik lokasi di peta + isi hint koordinat. Kalau reverseGeocode
+     true (klik peta manual), otomatis tarik alamat lengkap dari Google
+     Geocoding API buat isi provinsi/kota/kecamatan/kelurahan/kode pos. */
+  function setSitePoint(lat, lng, reverseGeocode) {
     siteMap.dataset_lat = lat.toFixed(7);
     siteMap.dataset_lng = lng.toFixed(7);
     document.getElementById('latlng-hint').innerHTML = `<i class="bi bi-geo-alt-fill text-primary"></i> ${lat.toFixed(7)}, ${lng.toFixed(7)}`;
-    if (siteMarker) siteMarker.setLatLng([lat, lng]); else siteMarker = L.marker([lat, lng]).addTo(siteMap);
-    siteMap.setView([lat, lng], 15);
+    const pos = { lat, lng };
+    if (siteMarker) siteMarker.setPosition(pos); else siteMarker = new google.maps.Marker({ position: pos, map: siteMap });
+    siteMap.setCenter(pos);
+    siteMap.setZoom(15);
+    if (reverseGeocode) reverseGeocodeAndFill(lat, lng);
+  }
+
+  /* Autocomplete pencarian lokasi (search box di atas peta) — pilih hasil
+     -> set titik peta + isi otomatis field alamat dari address_components
+     yang sudah dibawa Places API (gak perlu geocode ulang). */
+  function initSiteAutocomplete() {
+    const input = document.getElementById('site-map-search');
+    if (!input || !window.google) return;
+    siteAutocomplete = new google.maps.places.Autocomplete(input, {
+      componentRestrictions: { country: 'id' },
+      fields: ['geometry', 'address_components', 'formatted_address'],
+    });
+    siteAutocomplete.addListener('place_changed', () => {
+      const place = siteAutocomplete.getPlace();
+      if (!place.geometry || !place.geometry.location) {
+        toast('Lokasi tidak ditemukan, coba kata kunci lain', 'error');
+        return;
+      }
+      const lat = place.geometry.location.lat();
+      const lng = place.geometry.location.lng();
+      if (!siteMap) initSiteMap();
+      setSitePoint(lat, lng, false);
+      fillAddressFromComponents(place.address_components || [], place.formatted_address);
+    });
+  }
+
+  function reverseGeocodeAndFill(lat, lng) {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === 'OK' && results && results[0]) {
+        fillAddressFromComponents(results[0].address_components, results[0].formatted_address);
+      }
+    });
+  }
+
+  /* Mapping komponen alamat Google -> field form site. Provinsi/kota/
+     kecamatan/kelurahan/kode pos ke-isi otomatis; admin tetap bisa
+     koreksi manual kalau kurang lengkap/tepat. */
+  function fillAddressFromComponents(components, formattedAddress) {
+    const get = (type) => {
+      const c = (components || []).find(comp => comp.types.includes(type));
+      return c ? c.long_name : '';
+    };
+    const provinsi = get('administrative_area_level_1');
+    const kota = get('administrative_area_level_2');
+    const kecamatan = get('administrative_area_level_3');
+    const kelurahan = get('administrative_area_level_4') || get('sublocality_level_1') || get('sublocality');
+    const kodePos = get('postal_code');
+
+    if (provinsi) document.getElementById('s-provinsi').value = provinsi;
+    if (kota) document.getElementById('s-kota').value = kota;
+    if (kecamatan) document.getElementById('s-kecamatan').value = kecamatan;
+    if (kelurahan) document.getElementById('s-kelurahan').value = kelurahan;
+    if (kodePos) document.getElementById('s-kodepos').value = kodePos;
+    if (formattedAddress) document.getElementById('s-alamat').value = formattedAddress;
   }
 
   async function saveSite() {
@@ -246,6 +323,7 @@
       kecamatan: document.getElementById('s-kecamatan').value.trim(),
       kelurahan: document.getElementById('s-kelurahan').value.trim(),
       alamat_detail: document.getElementById('s-alamat').value.trim(),
+      kode_pos: document.getElementById('s-kodepos').value.trim(),
       keterangan_pekerjaan: document.getElementById('s-keterangan').value.trim(),
       status_projek: document.getElementById('s-status-projek').value,
       status_gangguan: document.getElementById('s-status-gangguan').value,
