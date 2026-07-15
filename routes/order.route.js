@@ -295,7 +295,7 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
     );
 
     const orderId = result.insertId;
-    const orderNo = `ORD-${kode_site}-${String(orderId).padStart(5, '0')}`;
+    const orderNo = `ORD-${site.kode_site}-${String(orderId).padStart(5, '0')}`;
     await conn.query(`UPDATE oki_orders SET order_no = ? WHERE id = ?`, [orderNo, orderId]);
 
     if (Array.isArray(rincian_biaya)) {
