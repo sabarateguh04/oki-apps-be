@@ -6,6 +6,7 @@
 <title>Master Site — OKI Maintenance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -73,7 +74,11 @@
         </div>
 
         <h6 class="fw-bold text-muted small text-uppercase mb-2">Titik Lokasi (cari lokasi atau klik peta — alamat terisi otomatis)</h6>
-        <input type="text" class="form-control mb-2" id="site-map-search" placeholder="Cari lokasi di Google Maps...">
+        <div class="position-relative mb-2">
+          <input type="text" class="form-control" id="site-map-search" placeholder="Cari nama tempat/alamat..." autocomplete="off"
+                 oninput="onSiteSearchInput()" onblur="setTimeout(()=>{document.getElementById('site-search-results').style.display='none';},200)">
+          <div id="site-search-results" class="list-group position-absolute w-100" style="z-index:1060;max-height:220px;overflow-y:auto;display:none;box-shadow:0 6px 16px rgba(0,0,0,.15);"></div>
+        </div>
         <div id="site-map" style="height:240px;border-radius:12px;border:1px solid #dee2e6;"></div>
         <div class="form-text mb-3" id="latlng-hint">Belum dipilih — klik di peta atau cari lokasi</div>
 
@@ -125,12 +130,12 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAOxkFGWCdGjrutgQmjJeFg2Av9k5Dqsgk&libraries=places&language=id&region=ID"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
   const session = requireAuth(['staff']);
-  let modal, sites = [], customers = [], siteMap, siteMarker, searchTimer, siteAutocomplete;
+  let modal, sites = [], customers = [], siteMap, siteMarker, searchTimer, geoSearchTimer, geoSearchResults = [];
 
   if (session && session.role !== 'ADMIN') {
     document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Site hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
@@ -138,7 +143,6 @@
     renderLayout({ active: 'site', title: 'Master Site' });
     loadCustomersForFilterAndForm();
     loadSites();
-    initSiteAutocomplete();
   }
 
   async function loadCustomersForFilterAndForm() {
@@ -212,101 +216,112 @@
     document.getElementById('s-keterangan').value = s.keterangan_pekerjaan || '';
     document.getElementById('s-status-projek').value = s.status_projek || 'ACTIVE';
     document.getElementById('s-status-gangguan').value = s.status_gangguan || 'BERJALAN';
+    document.getElementById('site-map-search').value = '';
+    document.getElementById('site-search-results').style.display = 'none';
 
     modal.show();
     setTimeout(() => {
-      if (!siteMap) initSiteMap();
-      google.maps.event.trigger(siteMap, 'resize');
+      initSiteMap();
       const lat = s.latitude ? Number(s.latitude) : null;
       const lng = s.longitude ? Number(s.longitude) : null;
-      if (lat && lng) {
-        setSitePoint(lat, lng, false);
-      } else {
-        if (siteMarker) { siteMarker.setMap(null); siteMarker = null; }
-        siteMap.setCenter({ lat: -6.4, lng: 106.8 });
-        siteMap.setZoom(11);
-        siteMap.dataset_lat = null;
-        siteMap.dataset_lng = null;
-        document.getElementById('latlng-hint').textContent = 'Belum dipilih — klik di peta atau cari lokasi';
-      }
+      if (lat && lng) setSitePoint(lat, lng, false); else document.getElementById('latlng-hint').textContent = 'Belum dipilih — klik di peta atau cari lokasi';
     }, 250);
   }
 
   function initSiteMap() {
-    siteMap = new google.maps.Map(document.getElementById('site-map'), {
-      center: { lat: -6.4, lng: 106.8 },
-      zoom: 11,
-    });
-    siteMap.addListener('click', (e) => setSitePoint(e.latLng.lat(), e.latLng.lng(), true));
+    if (siteMap) { siteMap.remove(); siteMap = null; siteMarker = null; }
+    siteMap = L.map('site-map').setView([-6.4, 106.8], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(siteMap);
+    siteMap.on('click', (e) => setSitePoint(e.latlng.lat, e.latlng.lng, true));
+    siteMap.invalidateSize();
   }
 
   /* Set titik lokasi di peta + isi hint koordinat. Kalau reverseGeocode
-     true (klik peta manual), otomatis tarik alamat lengkap dari Google
-     Geocoding API buat isi provinsi/kota/kecamatan/kelurahan/kode pos. */
+     true (klik peta manual), otomatis tarik alamat lengkap dari Nominatim
+     (OpenStreetMap) buat isi provinsi/kota/kecamatan/kelurahan/kode pos. */
   function setSitePoint(lat, lng, reverseGeocode) {
     siteMap.dataset_lat = lat.toFixed(7);
     siteMap.dataset_lng = lng.toFixed(7);
     document.getElementById('latlng-hint').innerHTML = `<i class="bi bi-geo-alt-fill text-primary"></i> ${lat.toFixed(7)}, ${lng.toFixed(7)}`;
-    const pos = { lat, lng };
-    if (siteMarker) siteMarker.setPosition(pos); else siteMarker = new google.maps.Marker({ position: pos, map: siteMap });
-    siteMap.setCenter(pos);
-    siteMap.setZoom(15);
+    if (siteMarker) siteMarker.setLatLng([lat, lng]); else siteMarker = L.marker([lat, lng]).addTo(siteMap);
+    siteMap.setView([lat, lng], 15);
     if (reverseGeocode) reverseGeocodeAndFill(lat, lng);
   }
 
-  /* Autocomplete pencarian lokasi (search box di atas peta) — pilih hasil
-     -> set titik peta + isi otomatis field alamat dari address_components
-     yang sudah dibawa Places API (gak perlu geocode ulang). */
-  function initSiteAutocomplete() {
-    const input = document.getElementById('site-map-search');
-    if (!input || !window.google) return;
-    siteAutocomplete = new google.maps.places.Autocomplete(input, {
-      componentRestrictions: { country: 'id' },
-      fields: ['geometry', 'address_components', 'formatted_address'],
-    });
-    siteAutocomplete.addListener('place_changed', () => {
-      const place = siteAutocomplete.getPlace();
-      if (!place.geometry || !place.geometry.location) {
-        toast('Lokasi tidak ditemukan, coba kata kunci lain', 'error');
+  /* ── Search box lokasi pakai Nominatim (OpenStreetMap) — gratis, gak
+     perlu API key. Debounce 500ms + minimal 3 karakter biar gak nembak
+     request ke server publik Nominatim tiap ketikan (kena rate limit). ── */
+  function onSiteSearchInput() {
+    const q = document.getElementById('site-map-search').value.trim();
+    clearTimeout(geoSearchTimer);
+    const box = document.getElementById('site-search-results');
+    if (q.length < 3) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    geoSearchTimer = setTimeout(() => nominatimSearch(q), 500);
+  }
+
+  async function nominatimSearch(q) {
+    const box = document.getElementById('site-search-results');
+    box.innerHTML = '<div class="list-group-item small text-muted">Mencari...</div>';
+    box.style.display = 'block';
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=id&limit=6&q=${encodeURIComponent(q)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      geoSearchResults = data || [];
+      if (!geoSearchResults.length) {
+        box.innerHTML = '<div class="list-group-item small text-muted">Lokasi tidak ditemukan</div>';
         return;
       }
-      const lat = place.geometry.location.lat();
-      const lng = place.geometry.location.lng();
-      if (!siteMap) initSiteMap();
-      setSitePoint(lat, lng, false);
-      fillAddressFromComponents(place.address_components || [], place.formatted_address);
-    });
+      box.innerHTML = geoSearchResults.map((r, i) => `
+        <button type="button" class="list-group-item list-group-item-action small" onmousedown="event.preventDefault(); pickSearchResult(${i})">
+          <i class="bi bi-geo-alt text-muted"></i> ${escapeHtml(r.display_name)}
+        </button>`).join('');
+    } catch (e) {
+      box.innerHTML = '<div class="list-group-item small text-danger">Gagal mencari lokasi</div>';
+    }
   }
 
-  function reverseGeocodeAndFill(lat, lng) {
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      if (status === 'OK' && results && results[0]) {
-        fillAddressFromComponents(results[0].address_components, results[0].formatted_address);
-      }
-    });
+  function pickSearchResult(i) {
+    const r = geoSearchResults[i];
+    if (!r) return;
+    const lat = Number(r.lat), lng = Number(r.lon);
+    if (!siteMap) initSiteMap();
+    setSitePoint(lat, lng, false);
+    fillAddressFromNominatim(r.address, r.display_name);
+    document.getElementById('site-map-search').value = r.display_name;
+    document.getElementById('site-search-results').style.display = 'none';
   }
 
-  /* Mapping komponen alamat Google -> field form site. Provinsi/kota/
-     kecamatan/kelurahan/kode pos ke-isi otomatis; admin tetap bisa
-     koreksi manual kalau kurang lengkap/tepat. */
-  function fillAddressFromComponents(components, formattedAddress) {
-    const get = (type) => {
-      const c = (components || []).find(comp => comp.types.includes(type));
-      return c ? c.long_name : '';
-    };
-    const provinsi = get('administrative_area_level_1');
-    const kota = get('administrative_area_level_2');
-    const kecamatan = get('administrative_area_level_3');
-    const kelurahan = get('administrative_area_level_4') || get('sublocality_level_1') || get('sublocality');
-    const kodePos = get('postal_code');
+  async function reverseGeocodeAndFill(lat, lng) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=18&lat=${lat}&lon=${lng}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data && data.address) fillAddressFromNominatim(data.address, data.display_name);
+    } catch (e) {
+      toast('Gagal mengambil alamat otomatis, isi manual ya', 'error');
+    }
+  }
+
+  /* Mapping komponen alamat Nominatim -> field form site. Struktur field
+     Nominatim buat Indonesia gak selalu konsisten (beda dari satu titik ke
+     titik lain), jadi dicoba beberapa kemungkinan key per level.
+     Provinsi/kota/kecamatan/kelurahan/kode pos ke-isi otomatis; admin
+     tetap bisa koreksi manual kalau kurang lengkap/tepat. */
+  function fillAddressFromNominatim(address, displayName) {
+    if (!address) return;
+    const provinsi = address.state || '';
+    const kota = address.city || address.county || address.regency || address.state_district || '';
+    const kecamatan = address.suburb || address.city_district || address.subdistrict || '';
+    const kelurahan = address.village || address.hamlet || address.neighbourhood || address.residential || '';
+    const kodePos = address.postcode || '';
 
     if (provinsi) document.getElementById('s-provinsi').value = provinsi;
     if (kota) document.getElementById('s-kota').value = kota;
     if (kecamatan) document.getElementById('s-kecamatan').value = kecamatan;
     if (kelurahan) document.getElementById('s-kelurahan').value = kelurahan;
     if (kodePos) document.getElementById('s-kodepos').value = kodePos;
-    if (formattedAddress) document.getElementById('s-alamat').value = formattedAddress;
+    if (displayName) document.getElementById('s-alamat').value = displayName;
   }
 
   async function saveSite() {
