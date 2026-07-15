@@ -245,6 +245,7 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
   const b = req.body;
   const parseJson = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } };
 
+  const kode_site = b.kode_site;
   const customer_id = b.customer_id;
   const site_id = b.site_id;
   const rincian_biaya = parseJson(b.rincian_biaya, []);
@@ -293,7 +294,7 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
       ],
     );
 
-    const orderId = result.insertId;
+    const orderId = kode_site;//result.insertId;
     const orderNo = `ORD-${String(orderId).padStart(5, '0')}`;
     await conn.query(`UPDATE oki_orders SET order_no = ? WHERE id = ?`, [orderNo, orderId]);
 
