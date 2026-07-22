@@ -782,4 +782,32 @@ router.post('/:id/close', requireRole('ADMIN'), async (req, res) => {
   }
 });
 
+
+/* ═══════════════════════════════════════════════════
+   GET /api/orders/pending/mine — HANYA TEKNISI
+   Daftar order yang SUDAH diterima (ACCEPTED) teknisi ini tapi BELUM
+   di-assign final oleh admin. Supaya order gak "hilang" dari pandangan
+   teknisi selagi nunggu konfirmasi.
+   PENTING: harus didaftarkan SEBELUM GET /:id biar 'pending' gak
+   ketangkep jadi :id.
+═══════════════════════════════════════════════════ */
+router.get('/pending/mine', requireTechnician, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT o.id, o.order_no, o.category, o.priority, o.wilayah, o.description,
+              o.tanggal_mulai, o.tanggal_selesai_target, c.nama_perusahaan, ot.responded_at AS accepted_at
+       FROM oki_order_technicians ot
+       JOIN oki_orders o ON o.id = ot.order_id
+       JOIN oki_customers c ON c.id = o.customer_id
+       WHERE ot.technician_id = ? AND ot.status = 'ACCEPTED'
+       ORDER BY ot.responded_at DESC`,
+      [req.user.id],
+    );
+    return res.json({ success: true, pending: rows });
+  } catch (e) {
+    console.error('[ORDER pending/mine]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;
