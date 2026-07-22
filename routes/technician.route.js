@@ -179,4 +179,29 @@ router.post('/:id/location', requireTechnician, async (req, res) => {
   }
 });
 
+
+
+/* ═══════════════════════════════════════════════════
+   POST /api/technicians/:id/fcm-token
+   Simpan/update FCM token dari HP teknisi. Dipanggil app tiap kali
+   token berubah (login pertama & onTokenRefresh).
+   body: { fcm_token }
+═══════════════════════════════════════════════════ */
+router.post('/:id/fcm-token', requireTechnician, async (req, res) => {
+  const { fcm_token } = req.body;
+  if (!fcm_token) {
+    return res.status(400).json({ success: false, message: 'fcm_token wajib diisi' });
+  }
+  if (Number(req.user.id) !== Number(req.params.id)) {
+    return res.status(403).json({ success: false, message: 'Tidak boleh set token teknisi lain' });
+  }
+  try {
+    await pool.query(`UPDATE oki_technicians SET fcm_token = ? WHERE id = ?`, [fcm_token, req.params.id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[TECH fcm-token]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;

@@ -4,6 +4,7 @@ const { getAssignEligibility } = require('../helpers/assignEligibility');
 const { emitToDashboard, emitToTechnician } = require('../socket');
 const { requireAuth, requireRole, requireTechnician } = require('../middleware/auth');
 const { handleUploadMultiple, publicUrlFor } = require('../middleware/upload');
+const { sendPushToTechnician } = require('../push');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -444,6 +445,7 @@ router.post('/:id/plan-technician', requireRole('ADMIN'), async (req, res) => {
     await logTimeline(req.params.id, 'NOTE', `Tugas ditawarkan ke ${tech[0].nama}`, 'USER', req.user.id);
     emitToDashboard('order-updated', { orderId: Number(req.params.id) });
     emitToTechnician(technician_id, 'new-offer', { orderId: Number(req.params.id) });
+    sendPushToTechnician(technician_id, 'Tawaran Tugas Baru', `Order ${req.params.id} menunggu respon kamu`, { orderId: req.params.id, type: 'new-offer' });
     return res.json({ success: true, message: `Tugas ditawarkan ke ${tech[0].nama}, menunggu respon` });
   } catch (e) {
     console.error('[ORDER plan-technician]', e.message);
@@ -676,7 +678,8 @@ router.post('/:id/assign', requireRole('ADMIN'), async (req, res) => {
     await logTimeline(req.params.id, 'ASSIGNED', `Dikonfirmasi & ditugaskan ke ${names}`, 'USER', req.user.id);
     emitToDashboard('order-assigned', { orderId: Number(req.params.id), technicianIds: technician_ids });
     technician_ids.forEach(techId => emitToTechnician(techId, 'assignment-confirmed', { orderId: Number(req.params.id) }));
-
+    technician_ids.forEach(techId => sendPushToTechnician(techId, 'Tugas Dikonfirmasi', `Order ${req.params.id} sudah di-assign final, siap dikerjakan`, { orderId: req.params.id, type: 'assignment-confirmed' }));
+    
     return res.json({ success: true, message: `Order berhasil di-assign ke ${names}` });
   } catch (e) {
     console.error('[ORDER assign]', e.message);

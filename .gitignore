@@ -20,3 +20,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+
+# Firebase service account
+firebase-service-account.json
