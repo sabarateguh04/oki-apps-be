@@ -199,7 +199,9 @@
 
     try {
       if (id) {
-        await api(`/api/technicians/${id}`, { method: 'PUT', body: JSON.stringify(profile) });
+        const body = { ...profile };
+        if (password) body.password = password;
+        await api(`/api/technicians/${id}`, { method: 'PUT', body: JSON.stringify(body) });
         toast('Teknisi berhasil diupdate', 'success');
       } else {
         const username = document.getElementById('t-username').value.trim();
