@@ -611,8 +611,12 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
       return res.status(403).json({ success: false, message: 'Anda belum di-assign final ke order ini' });
     }
     const [[order]] = await pool.query(`SELECT status FROM oki_orders WHERE id = ?`, [req.params.id]);
-    if (!['ON_THE_WAY', 'IN_PROGRESS'].includes(order.status)) {
-      return res.status(409).json({ success: false, message: 'Checklist BA cuma bisa diisi selama order masih berjalan (belum DONE)' });
+    // Boleh diisi/diedit selama ON_THE_WAY / IN_PROGRESS / DONE -- sama
+    // kayak endpoint bukti tambahan, baru berhenti bisa diisi setelah
+    // admin CLOSE tiketnya (misal teknisi baru sadar ada SN salah ketik
+    // setelah declare order selesai, masih bisa dibetulkan sebelum ditutup).
+    if (!['ON_THE_WAY', 'IN_PROGRESS', 'DONE'].includes(order.status)) {
+      return res.status(409).json({ success: false, message: 'Checklist BA cuma bisa diisi selama order masih berjalan (belum ditutup admin)' });
     }
 
     const [[item]] = await pool.query(

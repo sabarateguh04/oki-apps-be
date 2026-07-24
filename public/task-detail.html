@@ -147,7 +147,7 @@
     const biayaSaya = o.rincian_biaya || [];
     const baChecklist = o.ba_checklist || [];
     const hasBa = baChecklist.length > 0;
-    const canFillBa = isAssigned && ['ON_THE_WAY','IN_PROGRESS'].includes(o.status);
+    const canFillBa = isAssigned && ['ON_THE_WAY','IN_PROGRESS','DONE'].includes(o.status);
 
     const mapLat = o.lokasi_lat || o.customer_lat;
     const mapLng = o.lokasi_lng || o.customer_lng;
@@ -187,10 +187,10 @@
 
           ${baChecklistCard(baChecklist, canFillBa)}
 
-          ${!hasBa ? `
           <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-camera"></i> Bukti Pekerjaan Saya</div>
+            <div class="card-header"><i class="bi bi-camera"></i> ${hasBa ? 'Bukti Tambahan (di luar Checklist BA)' : 'Bukti Pekerjaan Saya'}</div>
             <div class="card-body">
+              ${hasBa ? `<p class="text-muted small">Dipakai buat foto/file tambahan yang gak termasuk item checklist BA di atas, misal kondisi lokasi, catatan situasi, dsb. Checklist BA di atas tetap wajib diisi terpisah.</p>` : ''}
               <div id="work-proof-gallery">${workProofGallery(o.bukti_pekerjaan)}</div>
               ${canUploadProof ? `
                 <hr>
@@ -199,7 +199,7 @@
                 <button class="btn btn-sm btn-primary" onclick="uploadProof()"><i class="bi bi-upload"></i> Upload</button>
               ` : `<div class="form-text mt-2">${isAssigned ? 'Upload bukti pekerjaan bisa dilakukan begitu status "Menuju Lokasi" ke atas.' : 'Anda belum di-assign final ke tugas ini.'}</div>`}
             </div>
-          </div>` : ''}
+          </div>
 
           <div class="card">
             <div class="card-header"><i class="bi bi-clock-history"></i> Timeline</div>
