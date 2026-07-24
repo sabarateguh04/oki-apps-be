@@ -13,6 +13,9 @@
   .work-proof-item{ display:inline-block; margin:4px 6px 4px 0; }
   .work-proof-item img{ width:96px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #e9ecef; }
   .biaya-row-tech{ border:1px solid #eee; border-radius:10px; padding:10px; margin-bottom:8px; }
+  .ba-check-item{ border:1px solid #eee; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+  .ba-check-item.done{ background:#f4fbf6; border-color:#c8e9d3; }
+  .ba-cat-badge{ background:#eef1f6; border-radius:8px; padding:2px 8px; font-size:11px; font-weight:600; }
 </style>
 </head>
 <body>
@@ -55,6 +58,68 @@
     return files.map(f => `<a href="${f.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> ${f.judul ? escapeHtml(f.judul) : 'Lihat file'}</a>`).join('');
   }
 
+  function baChecklistCard(items, canFill) {
+    if (!items.length) return '';
+    const pending = items.filter(i => i.status === 'PENDING').length;
+    return `
+      <div class="card mb-3">
+        <div class="card-header d-flex align-items-center">
+          <span class="flex-grow-1"><i class="bi bi-list-check"></i> Checklist Bukti Pekerjaan (BA)</span>
+          <span class="badge ${pending === 0 ? 'badge-status-DONE' : 'badge-approval-PENDING'}">${pending === 0 ? 'Lengkap' : pending + ' belum diisi'}</span>
+        </div>
+        <div class="card-body">
+          ${items.map(it => `
+            <div class="ba-check-item ${it.status === 'DONE' ? 'done' : ''}" id="ba-item-${it.id}">
+              <div class="d-flex align-items-start gap-2 flex-wrap">
+                <span class="ba-cat-badge">${escapeHtml(it.category)}</span>
+                <div class="flex-grow-1">
+                  <div><b>${escapeHtml(it.template_name)}</b> ${it.status === 'DONE' ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</div>
+                  ${it.note_ba ? `<div class="text-muted small">${escapeHtml(it.note_ba)}</div>` : ''}
+                  ${it.template_type === 'text' ? `
+                    <div class="input-group input-group-sm mt-2" style="max-width:360px;">
+                      <input type="text" class="form-control" id="ba-text-${it.id}" placeholder="Masukkan nilai" value="${it.text_value ? escapeHtml(it.text_value) : ''}" ${!canFill ? 'disabled' : ''}>
+                      ${canFill ? `<button class="btn btn-outline-primary" onclick="saveBaText(${it.id})"><i class="bi bi-check-lg"></i></button>` : ''}
+                    </div>
+                  ` : `
+                    <div class="mt-2">
+                      ${it.file_url ? `<a href="${it.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : ''}
+                      ${canFill ? `
+                        <input type="file" class="form-control form-control-sm mt-2" id="ba-file-${it.id}" accept="image/*,application/pdf" style="max-width:320px;">
+                        <button class="btn btn-sm btn-outline-primary mt-1" onclick="uploadBaFile(${it.id})"><i class="bi bi-upload"></i> ${it.file_url ? 'Ganti File' : 'Upload'}</button>
+                      ` : ''}
+                    </div>
+                  `}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  async function saveBaText(checklistId) {
+    const input = document.getElementById(`ba-text-${checklistId}`);
+    const value = input.value.trim();
+    if (!value) { toast('Isi dulu nilainya', 'error'); return; }
+    try {
+      await api(`/api/orders/${orderId}/ba-checklist/${checklistId}`, { method: 'POST', body: JSON.stringify({ text_value: value }) });
+      toast('Item checklist tersimpan', 'success');
+      loadTask();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function uploadBaFile(checklistId) {
+    const input = document.getElementById(`ba-file-${checklistId}`);
+    if (!input.files || !input.files.length) { toast('Pilih file dulu', 'error'); return; }
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    try {
+      await apiUpload(`/api/orders/${orderId}/ba-checklist/${checklistId}`, fd);
+      toast('File checklist berhasil diupload', 'success');
+      loadTask();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
   function workProofGallery(files) {
     if (!files || !files.length) return '<p class="text-muted small mb-0">Belum ada bukti pekerjaan diupload.</p>';
     return files.map(f => {
@@ -80,6 +145,9 @@
     const isAssigned = (o.technicians_assigned||[]).some(t => Number(t.id) === Number(session.id));
     const canUploadProof = isAssigned && ['ON_THE_WAY','IN_PROGRESS','DONE'].includes(o.status);
     const biayaSaya = o.rincian_biaya || [];
+    const baChecklist = o.ba_checklist || [];
+    const hasBa = baChecklist.length > 0;
+    const canFillBa = isAssigned && ['ON_THE_WAY','IN_PROGRESS'].includes(o.status);
 
     const mapLat = o.lokasi_lat || o.customer_lat;
     const mapLng = o.lokasi_lng || o.customer_lng;
@@ -117,6 +185,9 @@
             <div class="card-body">${fileChips(o.lampiran)}</div>
           </div>` : ''}
 
+          ${baChecklistCard(baChecklist, canFillBa)}
+
+          ${!hasBa ? `
           <div class="card mb-3">
             <div class="card-header"><i class="bi bi-camera"></i> Bukti Pekerjaan Saya</div>
             <div class="card-body">
@@ -128,7 +199,7 @@
                 <button class="btn btn-sm btn-primary" onclick="uploadProof()"><i class="bi bi-upload"></i> Upload</button>
               ` : `<div class="form-text mt-2">${isAssigned ? 'Upload bukti pekerjaan bisa dilakukan begitu status "Menuju Lokasi" ke atas.' : 'Anda belum di-assign final ke tugas ini.'}</div>`}
             </div>
-          </div>
+          </div>` : ''}
 
           <div class="card">
             <div class="card-header"><i class="bi bi-clock-history"></i> Timeline</div>
@@ -155,7 +226,12 @@
             <div class="card-body d-grid gap-2">
               ${o.status === 'ASSIGNED' ? `<button class="btn btn-warning" onclick="updateMyStatus('ON_THE_WAY')"><i class="bi bi-signpost"></i> Menuju Lokasi</button>` : ''}
               ${o.status === 'ON_THE_WAY' ? `<button class="btn" style="background:#fd7e14;color:#fff;" onclick="updateMyStatus('IN_PROGRESS')"><i class="bi bi-tools"></i> Mulai Kerjakan</button>` : ''}
-              ${o.status === 'IN_PROGRESS' ? `<button class="btn btn-success" onclick="updateMyStatus('DONE')"><i class="bi bi-check-lg"></i> Selesaikan Order</button>` : ''}
+              ${o.status === 'IN_PROGRESS' ? (
+                hasBa && baChecklist.some(i => i.status === 'PENDING')
+                  ? `<button class="btn btn-success" disabled title="Lengkapi checklist BA dulu"><i class="bi bi-check-lg"></i> Selesaikan Order</button>
+                     <div class="form-text text-center">Lengkapi semua checklist BA di atas dulu sebelum bisa menyelesaikan order.</div>`
+                  : `<button class="btn btn-success" onclick="updateMyStatus('DONE')"><i class="bi bi-check-lg"></i> Selesaikan Order</button>`
+              ) : ''}
               ${['DONE','CLOSED','CANCELLED'].includes(o.status) ? `<div class="text-muted small text-center">Tidak ada aksi lagi — status: ${o.status}</div>` : ''}
             </div>
           </div>` : `

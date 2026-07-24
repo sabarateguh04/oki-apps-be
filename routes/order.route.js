@@ -33,6 +33,17 @@ async function countPendingBiayaSebelum(orderId) {
   return row.n;
 }
 
+/* BARU: hitung berapa item checklist BA yang masih PENDING di 1 order.
+   Kalau customer order ini gak punya BA, otomatis 0 baris (query aman,
+   gak perlu cek terpisah "punya BA atau nggak"). */
+async function countPendingBaChecklist(orderId) {
+  const [[row]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM oki_order_ba_checklist WHERE order_id = ? AND status = 'PENDING'`,
+    [orderId],
+  );
+  return row.n;
+}
+
 /* Helper: simpan banyak file upload ke oki_order_files sekaligus, balikin array url.
    uploaderType: 'USER' (staff, default) atau 'TECHNICIAN' — nentuin kolom mana
    yang keisi (uploaded_by vs uploaded_by_technician_id), karena teknisi gak
@@ -42,7 +53,7 @@ async function saveFiles(conn, orderId, kategori, files, uploadedBy, refId = nul
   for (let i = 0; i < (files || []).length; i++) {
     const url = publicUrlFor(files[i].filename);
     const judul = Array.isArray(judulList) ? (judulList[i] || null) : (judulList || null);
-    await conn.query(
+    const [result] = await conn.query(
       `INSERT INTO oki_order_files (order_id, kategori, ref_id, judul, file_url, uploaded_by, uploaded_by_technician_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -51,12 +62,35 @@ async function saveFiles(conn, orderId, kategori, files, uploadedBy, refId = nul
         uploaderType === 'TECHNICIAN' ? uploadedBy : null,
       ],
     );
-    urls.push(url);
+    urls.push({ id: result.insertId, url });
   }
   return urls;
 }
 
-/* Helper: ambil 1 order + hitung assign eligibility-nya + teknisi + kebutuhan + biaya + file */
+/* BARU: saat order dibuat, kalau customer-nya punya master BA, salin
+   ("snapshot") semua item oki_customers_ba_template jadi baris-baris
+   oki_order_ba_checklist buat order ini -- status semuanya PENDING.
+   Kalau customer gak punya BA, fungsi ini gak ngapa-ngapain (order
+   jalan bebas seperti biasa, gak ada checklist). */
+async function snapshotBaChecklist(conn, orderId, customerId) {
+  const [[ba]] = await conn.query(`SELECT id FROM oki_customers_ba WHERE id_customer = ?`, [customerId]);
+  if (!ba) return; // customer belum punya BA -- normal, skip aja
+
+  const [templates] = await conn.query(
+    `SELECT * FROM oki_customers_ba_template WHERE id_customers_ba = ? ORDER BY urutan ASC, id ASC`,
+    [ba.id],
+  );
+  for (const t of templates) {
+    await conn.query(
+      `INSERT INTO oki_order_ba_checklist
+         (order_id, template_id, category, template_name, template_type, note_ba, urutan)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, t.id, t.category, t.template_name, t.template_type, t.note_ba, t.urutan],
+    );
+  }
+}
+
+/* Helper: ambil 1 order + hitung assign eligibility-nya + teknisi + kebutuhan + biaya + file + checklist BA */
 async function getOrderWithEligibility(orderId) {
   const [rows] = await pool.query(
     `SELECT o.*, c.nama_perusahaan, c.pic_nama, c.pic_hp, c.alamat AS customer_alamat,
@@ -90,6 +124,16 @@ async function getOrderWithEligibility(orderId) {
   const [files] = await pool.query(
     `SELECT * FROM oki_order_files WHERE order_id = ? ORDER BY created_at ASC`, [orderId],
   );
+  // BARU: checklist BA -- JOIN ke oki_order_files buat dapetin file_url
+  // item yang tipenya 'file' (kalau sudah diisi).
+  const [baChecklist] = await pool.query(
+    `SELECT bc.*, f.file_url
+     FROM oki_order_ba_checklist bc
+     LEFT JOIN oki_order_files f ON f.id = bc.file_id
+     WHERE bc.order_id = ?
+     ORDER BY bc.urutan ASC, bc.id ASC`,
+    [orderId],
+  );
 
   const pendingKebutuhan = kebutuhan.filter(k => k.status === 'PENDING').length;
   const pendingBiayaSebelum = biaya.filter(b => b.timing_bayar === 'SEBELUM' && b.status === 'PENDING').length;
@@ -112,6 +156,7 @@ async function getOrderWithEligibility(orderId) {
     })),
     lampiran: files.filter(f => f.kategori === 'LAMPIRAN'),
     bukti_pekerjaan: files.filter(f => f.kategori === 'PEKERJAAN'),
+    ba_checklist: baChecklist, // [] kalau customer gak punya BA -- FE tinggal cek .length
     assign_eligibility: getAssignEligibility(order, pendingKebutuhan, pendingBiayaSebelum, acceptedTechCount, assignedTechCount),
   };
 }
@@ -246,7 +291,6 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
   const b = req.body;
   const parseJson = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } };
 
-  const kode_site = b.kode_site;
   const customer_id = b.customer_id;
   const site_id = b.site_id;
   const rincian_biaya = parseJson(b.rincian_biaya, []);
@@ -322,6 +366,10 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
     if (req.files && req.files.length) {
       await saveFiles(conn, orderId, 'LAMPIRAN', req.files, req.user.id, null, judulList);
     }
+
+    // BARU: kalau customer ini punya master BA, salin template-nya jadi
+    // checklist buat order ini. Kalau gak punya, gak ngapa-ngapain.
+    await snapshotBaChecklist(conn, orderId, customer_id);
 
     await conn.query(
       `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id) VALUES (?, 'CREATED', ?, 'USER', ?)`,
@@ -506,9 +554,10 @@ router.post('/:id/respond', requireTechnician, async (req, res) => {
 
 /* ═══════════════════════════════════════════════════
    POST /api/orders/:id/pekerjaan — HANYA TEKNISI yang ASSIGNED di order ini
-   Upload bukti hasil kerja (foto dsb) — boleh kapan aja selama order
-   berstatus ON_THE_WAY/IN_PROGRESS/DONE, boleh berkali-kali (nambah, gak
-   nge-replace yang lama).
+   Upload bukti hasil kerja BEBAS (foto dsb) — dipakai buat customer yang
+   TIDAK punya master BA (lihat ba_checklist di GET /:id -- kalau kosong,
+   berarti order ini gak ada template, upload bebas seperti ini tetap jalan
+   apa adanya seperti sebelumnya).
    multipart/form-data: { files[]: File[] (wajib >=1), keterangan?: string }
 ═══════════════════════════════════════════════════ */
 router.post('/:id/pekerjaan', requireTechnician, handleUploadMultiple('files', 10), async (req, res) => {
@@ -531,16 +580,83 @@ router.post('/:id/pekerjaan', requireTechnician, handleUploadMultiple('files', 1
     const conn = await pool.getConnection();
     try {
       const judulList = Array.isArray(req.body.keterangan) ? req.body.keterangan : (req.body.keterangan ? [req.body.keterangan] : null);
-      const urls = await saveFiles(conn, req.params.id, 'PEKERJAAN', req.files, req.user.id, null, judulList, 'TECHNICIAN');
+      const saved = await saveFiles(conn, req.params.id, 'PEKERJAAN', req.files, req.user.id, null, judulList, 'TECHNICIAN');
       const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
       await logTimeline(req.params.id, 'NOTE', `${tech.nama} upload ${req.files.length} bukti pekerjaan`, 'TECHNICIAN', req.user.id);
       emitToDashboard('order-updated', { orderId: Number(req.params.id) });
-      return res.json({ success: true, message: 'Bukti pekerjaan berhasil diupload', files: urls });
+      return res.json({ success: true, message: 'Bukti pekerjaan berhasil diupload', files: saved.map(s => s.url) });
     } finally {
       conn.release();
     }
   } catch (e) {
     console.error('[ORDER pekerjaan]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/* ═══════════════════════════════════════════════════
+   BARU: POST /api/orders/:id/ba-checklist/:checklistId — HANYA TEKNISI
+   yang ASSIGNED di order ini. Isi SATU item checklist BA:
+     - kalau item.template_type === 'text' -> body: { text_value }
+     - kalau item.template_type === 'file'  -> multipart/form-data: { file: File (1 file) }
+   Boleh diisi ulang (replace) selama order belum DONE/CLOSED.
+═══════════════════════════════════════════════════ */
+router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMultiple('file', 1), async (req, res) => {
+  try {
+    const [[relation]] = await pool.query(
+      `SELECT status FROM oki_order_technicians WHERE order_id = ? AND technician_id = ?`,
+      [req.params.id, req.user.id],
+    );
+    if (!relation || relation.status !== 'ASSIGNED') {
+      return res.status(403).json({ success: false, message: 'Anda belum di-assign final ke order ini' });
+    }
+    const [[order]] = await pool.query(`SELECT status FROM oki_orders WHERE id = ?`, [req.params.id]);
+    if (!['ON_THE_WAY', 'IN_PROGRESS'].includes(order.status)) {
+      return res.status(409).json({ success: false, message: 'Checklist BA cuma bisa diisi selama order masih berjalan (belum DONE)' });
+    }
+
+    const [[item]] = await pool.query(
+      `SELECT * FROM oki_order_ba_checklist WHERE id = ? AND order_id = ?`,
+      [req.params.checklistId, req.params.id],
+    );
+    if (!item) return res.status(404).json({ success: false, message: 'Item checklist tidak ditemukan' });
+
+    const conn = await pool.getConnection();
+    try {
+      if (item.template_type === 'text') {
+        const { text_value } = req.body;
+        if (!text_value || !text_value.trim()) {
+          return res.status(400).json({ success: false, message: 'text_value wajib diisi untuk item ini' });
+        }
+        await conn.query(
+          `UPDATE oki_order_ba_checklist
+           SET status='DONE', text_value=?, filled_by_technician_id=?, filled_at=NOW()
+           WHERE id = ?`,
+          [text_value.trim(), req.user.id, item.id],
+        );
+      } else {
+        // template_type === 'file'
+        if (!req.files || !req.files.length) {
+          return res.status(400).json({ success: false, message: 'Upload 1 file untuk item ini' });
+        }
+        const saved = await saveFiles(conn, req.params.id, 'PEKERJAAN_BA', [req.files[0]], req.user.id, item.id, item.template_name, 'TECHNICIAN');
+        await conn.query(
+          `UPDATE oki_order_ba_checklist
+           SET status='DONE', file_id=?, filled_by_technician_id=?, filled_at=NOW()
+           WHERE id = ?`,
+          [saved[0].id, req.user.id, item.id],
+        );
+      }
+
+      const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
+      await logTimeline(req.params.id, 'NOTE', `${tech.nama} mengisi checklist BA: ${item.template_name}`, 'TECHNICIAN', req.user.id);
+      emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+      return res.json({ success: true, message: 'Item checklist berhasil diisi' });
+    } finally {
+      conn.release();
+    }
+  } catch (e) {
+    console.error('[ORDER ba-checklist]', e.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -563,7 +679,8 @@ router.post('/:id/kebutuhan/:kebutuhanId/dibeli', requireRole('FINANCE'), handle
     );
     let urls = [];
     if (req.files && req.files.length) {
-      urls = await saveFiles(conn, req.params.id, 'KEBUTUHAN', req.files, req.user.id, Number(req.params.kebutuhanId));
+      const saved = await saveFiles(conn, req.params.id, 'KEBUTUHAN', req.files, req.user.id, Number(req.params.kebutuhanId));
+      urls = saved.map(s => s.url);
       await conn.query(`UPDATE oki_order_kebutuhan SET bukti_url = ? WHERE id = ?`, [urls[0], req.params.kebutuhanId]);
     }
     await logTimeline(req.params.id, 'NOTE', 'Finance menandai 1 kebutuhan pra-assign sudah dibeli', 'USER', req.user.id);
@@ -612,7 +729,8 @@ router.post('/:id/biaya/:biayaId/bayar', requireRole('FINANCE'), handleUploadMul
     try {
       let urls = [];
       if (req.files && req.files.length) {
-        urls = await saveFiles(conn, req.params.id, 'BIAYA', req.files, req.user.id, Number(req.params.biayaId));
+        const saved = await saveFiles(conn, req.params.id, 'BIAYA', req.files, req.user.id, Number(req.params.biayaId));
+        urls = saved.map(s => s.url);
       }
       await conn.query(`UPDATE oki_order_biaya SET status='DONE', paid_by=?, paid_at=NOW() WHERE id = ?`, [req.user.id, req.params.biayaId]);
       await logTimeline(req.params.id, 'NOTE', `Finance transfer biaya ${biaya.jenis} (${biaya.deskripsi || '-'}) selesai`, 'USER', req.user.id);
@@ -679,7 +797,7 @@ router.post('/:id/assign', requireRole('ADMIN'), async (req, res) => {
     emitToDashboard('order-assigned', { orderId: Number(req.params.id), technicianIds: technician_ids });
     technician_ids.forEach(techId => emitToTechnician(techId, 'assignment-confirmed', { orderId: Number(req.params.id) }));
     technician_ids.forEach(techId => sendPushToTechnician(techId, 'Tugas Dikonfirmasi', `Order ${req.params.id} sudah di-assign final, siap dikerjakan`, { orderId: req.params.id, type: 'assignment-confirmed' }));
-    
+
     return res.json({ success: true, message: `Order berhasil di-assign ke ${names}` });
   } catch (e) {
     console.error('[ORDER assign]', e.message);
@@ -692,6 +810,9 @@ router.post('/:id/assign', requireRole('ADMIN'), async (req, res) => {
    Progres pekerjaan: ON_THE_WAY / IN_PROGRESS / DONE -> HANYA teknisi yang
    ASSIGNED di order ini (Admin TIDAK boleh lagi ubah status pekerjaan).
    CANCELLED -> boleh Admin ATAU teknisi yang ASSIGNED.
+   BARU: khusus transisi ke DONE, DIBLOKIR kalau masih ada item checklist
+   BA yang PENDING (kalau order ini gak punya BA, otomatis 0 pending,
+   gak ada perubahan behavior buat customer yang belum pakai BA).
 ═══════════════════════════════════════════════════ */
 router.post('/:id/status', async (req, res) => {
   const { status, note } = req.body;
@@ -724,6 +845,17 @@ router.post('/:id/status', async (req, res) => {
 
     if (rows[0].status === 'ASSIGNED' && status !== 'ON_THE_WAY' && status !== 'CANCELLED') {
       return res.status(409).json({ success: false, message: 'Order harus ON_THE_WAY dulu sebelum IN_PROGRESS' });
+    }
+
+    // BARU: blokir DONE kalau checklist BA belum lengkap semua.
+    if (status === 'DONE') {
+      const pendingBa = await countPendingBaChecklist(req.params.id);
+      if (pendingBa > 0) {
+        return res.status(409).json({
+          success: false,
+          message: `Masih ada ${pendingBa} item checklist BA yang belum diisi. Lengkapi dulu sebelum menyelesaikan order.`,
+        });
+      }
     }
 
     const isDone = status === 'DONE';

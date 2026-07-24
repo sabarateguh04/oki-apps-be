@@ -105,6 +105,7 @@
           <td>${escapeHtml(c.pic_nama || '-')}</td>
           <td>${escapeHtml(c.telp_perusahaan || c.pic_hp || '-')}</td>
           <td class="text-end">
+            <a class="btn btn-sm btn-outline-success" href="customer-ba?customer_id=${c.id}" title="Kelola Master BA"><i class="bi bi-file-earmark-text"></i> BA</a>
             <button class="btn btn-sm btn-outline-primary" onclick="openModal(${c.id})"><i class="bi bi-pencil"></i></button>
             <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${c.id})"><i class="bi bi-trash"></i></button>
           </td>
