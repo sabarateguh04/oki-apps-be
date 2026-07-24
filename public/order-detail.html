@@ -20,6 +20,10 @@
   .work-proof-item img{ width:110px; height:110px; object-fit:cover; border-radius:10px; border:1px solid #e9ecef; }
   .ba-chevron{ transition: transform .15s ease; }
   button[aria-expanded="true"] .ba-chevron{ transform: rotate(90deg); }
+  .section-header{ cursor:pointer; user-select:none; }
+  .section-chevron{ transition: transform .15s ease; margin-left:auto; }
+  .section-header[aria-expanded="false"] .section-chevron{ transform: rotate(-90deg); }
+  .section-badge{ font-size:11px; font-weight:600; }
 </style>
 </head>
 <body>
@@ -192,6 +196,33 @@
     }).join('');
   }
 
+  /* Helper: 1 card collapsible (collapsed by default) buat kolom kiri.
+     Header-nya sendiri yang jadi trigger toggle (data-bs-toggle pasang di
+     div card-header langsung, gak perlu <button> terpisah). badge opsional
+     buat ringkasan info (jumlah file, total biaya, dst) yang tetep
+     kelihatan walau card-nya lagi ketutup. */
+  function collapsibleCard(id, icon, title, bodyHtml, badge) {
+    return `
+      <div class="card mb-3">
+        <div class="card-header d-flex align-items-center gap-2 section-header"
+             data-bs-toggle="collapse" data-bs-target="#${id}"
+             aria-expanded="false" aria-controls="${id}">
+          <i class="bi ${icon}"></i>
+          <span class="flex-grow-1">${title}</span>
+          ${badge || ''}
+          <i class="bi bi-chevron-down section-chevron"></i>
+        </div>
+        <div class="collapse" id="${id}">
+          <div class="card-body">${bodyHtml}</div>
+        </div>
+      </div>`;
+  }
+
+  function countBadge(text, tone) {
+    const cls = tone === 'success' ? 'badge-status-DONE' : tone === 'warn' ? 'badge-approval-PENDING' : 'text-bg-light border';
+    return `<span class="badge ${cls} section-badge">${text}</span>`;
+  }
+
   function render(o, timeline) {
     const canFinance  = session.role === 'FINANCE';
     const canAssign   = session.role === 'ADMIN';
@@ -212,9 +243,7 @@
       <div class="row g-3">
         <div class="col-lg-8">
 
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-info-circle"></i> Informasi Order</div>
-            <div class="card-body">
+          ${collapsibleCard('sec-info', 'bi-info-circle', 'Informasi Order', `
               <div class="row mb-2"><div class="col-4 text-muted small">Customer</div><div class="col-8 fw-semibold">${escapeHtml(o.nama_perusahaan)}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">PIC</div><div class="col-8">${escapeHtml(o.pic_nama || '-')} ${o.pic_hp ? '· ' + escapeHtml(o.pic_hp) : ''}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Kategori</div><div class="col-8">${CATEGORY_LABEL[o.category] || o.category}</div></div>
@@ -224,75 +253,56 @@
               <div class="row mb-2"><div class="col-4 text-muted small">Alamat Lokasi Trouble</div><div class="col-8">${escapeHtml(o.alamat_detail || o.customer_alamat || '-')}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Jadwal Pengerjaan</div><div class="col-8">${o.tanggal_mulai ? fmtDateOnly(o.tanggal_mulai) : '-'} s/d ${o.tanggal_selesai_target ? fmtDateOnly(o.tanggal_selesai_target) : '-'}</div></div>
               <div class="row"><div class="col-4 text-muted small">Dibuat</div><div class="col-8">${fmtDate(o.created_at)}</div></div>
-            </div>
-          </div>
+          `)}
 
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-geo-alt"></i> Titik Lokasi ${mapIsFallback ? '(alamat customer, belum ada titik trouble spesifik)' : 'Trouble'}</div>
-            <div class="card-body p-0">
+          ${collapsibleCard('sec-lokasi', 'bi-geo-alt', `Titik Lokasi ${mapIsFallback ? '<span class="text-muted small">(alamat customer)</span>' : 'Trouble'}`, `
               ${mapLat && mapLng
-                ? '<div id="loc-map" style="height:240px;border-radius:0 0 16px 16px;"></div>'
+                ? '<div id="loc-map" style="height:240px;border-radius:12px;"></div>'
                 : '<div class="empty-state py-4"><i class="bi bi-geo"></i><p>Belum ada titik lokasi diset untuk order maupun customer ini</p></div>'}
-            </div>
-          </div>
+          `)}
 
-          ${o.lampiran && o.lampiran.length ? `
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-paperclip"></i> Lampiran Pendukung</div>
-            <div class="card-body">${fileChips(o.lampiran)}</div>
-          </div>` : ''}
+          ${o.lampiran && o.lampiran.length ? collapsibleCard('sec-lampiran', 'bi-paperclip', 'Lampiran Pendukung',
+              fileChips(o.lampiran),
+              countBadge(`${o.lampiran.length} file`)) : ''}
 
-          ${o.ba_checklist && o.ba_checklist.length ? `
-          <div class="card mb-3">
-            <div class="card-header d-flex align-items-center gap-2">
-              <i class="bi bi-clipboard-check"></i> Checklist Bukti Pekerjaan (BA)
-              <span class="ms-auto badge ${o.ba_checklist.every(i => i.status === 'DONE') ? 'badge-status-DONE' : 'badge-approval-PENDING'}">
-                ${o.ba_checklist.filter(i => i.status === 'DONE').length}/${o.ba_checklist.length} terisi
-              </span>
-            </div>
-            <div class="card-body">${renderBaChecklist(o.ba_checklist)}</div>
-          </div>` : ''}
+          ${o.ba_checklist && o.ba_checklist.length ? collapsibleCard('sec-ba', 'bi-clipboard-check', 'Checklist Bukti Pekerjaan (BA)',
+              renderBaChecklist(o.ba_checklist),
+              countBadge(`${o.ba_checklist.filter(i => i.status === 'DONE').length}/${o.ba_checklist.length} terisi`,
+                o.ba_checklist.every(i => i.status === 'DONE') ? 'success' : 'warn')) : ''}
 
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-camera"></i> Hasil Pekerjaan Teknisi</div>
-            <div class="card-body">${workProofGallery(o.bukti_pekerjaan)}</div>
-          </div>
+          ${collapsibleCard('sec-bukti', 'bi-camera', 'Hasil Pekerjaan Teknisi',
+              workProofGallery(o.bukti_pekerjaan),
+              countBadge(`${(o.bukti_pekerjaan||[]).length} file`))}
 
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-cash-coin"></i> Rincian Biaya & Status Transfer</div>
-            <div class="card-body" id="biaya-section-body">
-              ${biaya.length ? biaya.map(b => renderBiayaRow(o, b, canFinance)).join('') : '<p class="text-muted small">Belum ada rincian biaya.</p>'}
-              <div class="row mt-2"><div class="col-6 fw-bold">Total</div><div class="col-6 text-end fw-bold text-primary">${rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart)+Number(o.biaya_transport))}</div></div>
-            </div>
-          </div>
+          ${collapsibleCard('sec-biaya', 'bi-cash-coin', 'Rincian Biaya & Status Transfer', `
+              <div id="biaya-section-body">
+                ${biaya.length ? biaya.map(b => renderBiayaRow(o, b, canFinance)).join('') : '<p class="text-muted small">Belum ada rincian biaya.</p>'}
+                <div class="row mt-2"><div class="col-6 fw-bold">Total</div><div class="col-6 text-end fw-bold text-primary">${rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart)+Number(o.biaya_transport))}</div></div>
+              </div>
+          `, countBadge(rupiah(Number(o.biaya_jasa)+Number(o.biaya_sparepart)+Number(o.biaya_transport))))}
 
-          ${kebutuhan.length ? `
-          <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-bag-check"></i> Kebutuhan Barang yang Harus Dibeli Sebelum Assign</div>
-            <div class="card-body p-0">
+          ${kebutuhan.length ? collapsibleCard('sec-kebutuhan', 'bi-bag-check', 'Kebutuhan Barang Sebelum Assign', `
               <table class="table table-sm mb-0">
                 <thead><tr><th>Item</th><th>Qty</th><th>Estimasi Harga</th><th>Status</th><th>Bukti</th>${canFinance ? '<th></th>' : ''}</tr></thead>
                 <tbody id="kebutuhan-section-body">
                   ${kebutuhan.map(k => renderKebutuhanRow(k, canFinance)).join('')}
                 </tbody>
               </table>
-            </div>
-          </div>` : ''}
+          `, countBadge(`${kebutuhan.filter(k=>k.status==='PENDING').length} pending`, kebutuhan.some(k=>k.status==='PENDING') ? 'warn' : 'success')) : ''}
 
-          <div class="card">
-            <div class="card-header"><i class="bi bi-clock-history"></i> Timeline Pekerjaan</div>
-            <div class="card-body" style="max-height:320px; overflow-y:auto;">
-              ${timeline.length ? [...timeline].reverse().map(t => `
-                <div class="tl-item">
-                  <div class="tl-dot"><i class="bi bi-dot"></i></div>
-                  <div>
-                    <div class="tl-title">${t.event_type.replace(/_/g,' ')}</div>
-                    ${t.note ? `<div class="tl-note">${escapeHtml(t.note)}</div>` : ''}
-                    <div class="tl-time">${fmtDate(t.created_at)}</div>
-                  </div>
-                </div>`).join('') : '<div class="empty-state"><i class="bi bi-clock-history"></i><p>Belum ada aktivitas</p></div>'}
-            </div>
-          </div>
+          ${collapsibleCard('sec-timeline', 'bi-clock-history', 'Timeline Pekerjaan', `
+              <div style="max-height:320px; overflow-y:auto;">
+                ${timeline.length ? [...timeline].reverse().map(t => `
+                  <div class="tl-item">
+                    <div class="tl-dot"><i class="bi bi-dot"></i></div>
+                    <div>
+                      <div class="tl-title">${t.event_type.replace(/_/g,' ')}</div>
+                      ${t.note ? `<div class="tl-note">${escapeHtml(t.note)}</div>` : ''}
+                      <div class="tl-time">${fmtDate(t.created_at)}</div>
+                    </div>
+                  </div>`).join('') : '<div class="empty-state"><i class="bi bi-clock-history"></i><p>Belum ada aktivitas</p></div>'}
+              </div>
+          `, countBadge(`${timeline.length} aktivitas`))}
 
         </div>
 
@@ -301,7 +311,17 @@
     `;
 
     if (!(o.technicians_assigned||[]).length && canAssign) loadTechnicianOptions();
-    if (mapLat && mapLng) initLocMap(Number(mapLat), Number(mapLng));
+
+    // Map di-init HANYA saat card "Titik Lokasi" pertama kali dibuka --
+    // Leaflet gak bisa ngukur ukuran container yang lagi ketutup (display:none),
+    // jadi kalau di-init pas masih collapsed, peta bakal blank/kepotong.
+    if (mapLat && mapLng) {
+      const locSection = document.getElementById('sec-lokasi');
+      locSection.addEventListener('shown.bs.collapse', () => {
+        if (!locMap) initLocMap(Number(mapLat), Number(mapLng));
+        else locMap.invalidateSize();
+      });
+    }
   }
 
   /* Panel kanan (approval/teknisi/assign/close) — dipisah jadi fungsi
