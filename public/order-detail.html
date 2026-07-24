@@ -137,6 +137,42 @@
     </tr>`;
   }
 
+  /* Render card "Checklist Bukti Pekerjaan (BA)" -- dikelompokkan per
+     kategori (mirror struktur yang sama dengan app Flutter teknisi),
+     supaya admin/atasan bisa langsung lihat hasil isian teknisi tanpa
+     buka app. Kalau order ini gak punya BA sama sekali, function ini
+     gak dipanggil sama sekali (lihat render()).
+  */
+  function renderBaChecklist(items) {
+    const byCategory = {};
+    items.forEach(i => {
+      const cat = i.category || 'Lainnya';
+      (byCategory[cat] = byCategory[cat] || []).push(i);
+    });
+
+    return Object.entries(byCategory).map(([cat, list]) => `
+      <div class="mb-3">
+        <div class="fw-semibold small text-uppercase text-muted mb-2">${escapeHtml(cat)}</div>
+        ${list.map(i => `
+          <div class="border rounded-3 p-2 mb-2" style="background:${i.status === 'DONE' ? '#f0fdf4' : '#fafafa'};">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div class="fw-semibold small">${escapeHtml(i.template_name)}</div>
+              ${i.status === 'DONE'
+                ? '<span class="badge badge-status-DONE"><i class="bi bi-check-lg"></i> Terisi</span>'
+                : '<span class="badge badge-approval-PENDING">Belum Diisi</span>'}
+            </div>
+            ${i.note_ba ? `<div class="text-muted small mt-1">${escapeHtml(i.note_ba)}</div>` : ''}
+            <div class="mt-2">
+              ${i.template_type === 'text'
+                ? (i.text_value ? `<code>${escapeHtml(i.text_value)}</code>` : '<span class="text-muted small">-</span>')
+                : (i.file_url ? `<a href="${i.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : '<span class="text-muted small">Belum ada file</span>')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+  }
+
   function render(o, timeline) {
     const canFinance  = session.role === 'FINANCE';
     const canAssign   = session.role === 'ADMIN';
@@ -184,6 +220,17 @@
           <div class="card mb-3">
             <div class="card-header"><i class="bi bi-paperclip"></i> Lampiran Pendukung</div>
             <div class="card-body">${fileChips(o.lampiran)}</div>
+          </div>` : ''}
+
+          ${o.ba_checklist && o.ba_checklist.length ? `
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center gap-2">
+              <i class="bi bi-clipboard-check"></i> Checklist Bukti Pekerjaan (BA)
+              <span class="ms-auto badge ${o.ba_checklist.every(i => i.status === 'DONE') ? 'badge-status-DONE' : 'badge-approval-PENDING'}">
+                ${o.ba_checklist.filter(i => i.status === 'DONE').length}/${o.ba_checklist.length} terisi
+              </span>
+            </div>
+            <div class="card-body">${renderBaChecklist(o.ba_checklist)}</div>
           </div>` : ''}
 
           <div class="card mb-3">
