@@ -18,6 +18,8 @@
   .biaya-row{ border:1px solid #eee; border-radius:10px; padding:10px; margin-bottom:8px; }
   .work-proof-item{ display:inline-block; margin:4px 6px 4px 0; }
   .work-proof-item img{ width:110px; height:110px; object-fit:cover; border-radius:10px; border:1px solid #e9ecef; }
+  .ba-chevron{ transition: transform .15s ease; }
+  button[aria-expanded="true"] .ba-chevron{ transform: rotate(90deg); }
 </style>
 </head>
 <body>
@@ -30,6 +32,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
@@ -150,27 +153,43 @@
       (byCategory[cat] = byCategory[cat] || []).push(i);
     });
 
-    return Object.entries(byCategory).map(([cat, list]) => `
-      <div class="mb-3">
-        <div class="fw-semibold small text-uppercase text-muted mb-2">${escapeHtml(cat)}</div>
-        ${list.map(i => `
-          <div class="border rounded-3 p-2 mb-2" style="background:${i.status === 'DONE' ? '#f0fdf4' : '#fafafa'};">
-            <div class="d-flex justify-content-between align-items-start gap-2">
-              <div class="fw-semibold small">${escapeHtml(i.template_name)}</div>
-              ${i.status === 'DONE'
-                ? '<span class="badge badge-status-DONE"><i class="bi bi-check-lg"></i> Terisi</span>'
-                : '<span class="badge badge-approval-PENDING">Belum Diisi</span>'}
-            </div>
-            ${i.note_ba ? `<div class="text-muted small mt-1">${escapeHtml(i.note_ba)}</div>` : ''}
-            <div class="mt-2">
-              ${i.template_type === 'text'
-                ? (i.text_value ? `<code>${escapeHtml(i.text_value)}</code>` : '<span class="text-muted small">-</span>')
-                : (i.file_url ? `<a href="${i.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : '<span class="text-muted small">Belum ada file</span>')}
-            </div>
+    return Object.entries(byCategory).map(([cat, list], idx) => {
+      const doneCount = list.filter(i => i.status === 'DONE').length;
+      const allDone = doneCount === list.length;
+      const collapseId = `ba-cat-${orderId}-${idx}`;
+      return `
+      <div class="border rounded-3 mb-2 overflow-hidden">
+        <button class="btn w-100 d-flex align-items-center gap-2 text-start py-2 px-3" type="button"
+                style="background:#f8f9fb;border:none;border-radius:0;"
+                data-bs-toggle="collapse" data-bs-target="#${collapseId}"
+                aria-expanded="false" aria-controls="${collapseId}">
+          <i class="bi bi-chevron-right small ba-chevron"></i>
+          <span class="fw-semibold small text-uppercase flex-grow-1">${escapeHtml(cat)}</span>
+          <span class="badge ${allDone ? 'badge-status-DONE' : 'badge-approval-PENDING'}">${doneCount}/${list.length} terisi</span>
+        </button>
+        <div class="collapse" id="${collapseId}">
+          <div class="p-2">
+            ${list.map(i => `
+              <div class="border rounded-3 p-2 mb-2" style="background:${i.status === 'DONE' ? '#f0fdf4' : '#fafafa'};">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                  <div class="fw-semibold small">${escapeHtml(i.template_name)}</div>
+                  ${i.status === 'DONE'
+                    ? '<span class="badge badge-status-DONE"><i class="bi bi-check-lg"></i> Terisi</span>'
+                    : '<span class="badge badge-approval-PENDING">Belum Diisi</span>'}
+                </div>
+                ${i.note_ba ? `<div class="text-muted small mt-1">${escapeHtml(i.note_ba)}</div>` : ''}
+                <div class="mt-2">
+                  ${i.template_type === 'text'
+                    ? (i.text_value ? `<code>${escapeHtml(i.text_value)}</code>` : '<span class="text-muted small">-</span>')
+                    : (i.file_url ? `<a href="${i.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : '<span class="text-muted small">Belum ada file</span>')}
+                </div>
+              </div>
+            `).join('')}
           </div>
-        `).join('')}
+        </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function render(o, timeline) {
@@ -201,6 +220,7 @@
               <div class="row mb-2"><div class="col-4 text-muted small">Kategori</div><div class="col-8">${CATEGORY_LABEL[o.category] || o.category}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Deskripsi</div><div class="col-8">${escapeHtml(o.description || '-')}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Wilayah</div><div class="col-8">${escapeHtml(o.wilayah || '-')}</div></div>
+              <div class="row mb-2"><div class="col-4 text-muted small">Site</div><div class="col-8">${o.site_name ? `${escapeHtml(o.site_name)} <span class="text-muted small">(${escapeHtml(o.kode_site || '-')})</span>` : '<span class="text-muted">-</span>'}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Alamat Lokasi Trouble</div><div class="col-8">${escapeHtml(o.alamat_detail || o.customer_alamat || '-')}</div></div>
               <div class="row mb-2"><div class="col-4 text-muted small">Jadwal Pengerjaan</div><div class="col-8">${o.tanggal_mulai ? fmtDateOnly(o.tanggal_mulai) : '-'} s/d ${o.tanggal_selesai_target ? fmtDateOnly(o.tanggal_selesai_target) : '-'}</div></div>
               <div class="row"><div class="col-4 text-muted small">Dibuat</div><div class="col-8">${fmtDate(o.created_at)}</div></div>
