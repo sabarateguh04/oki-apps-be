@@ -270,7 +270,7 @@
               countBadge(`${o.ba_checklist.filter(i => i.status === 'DONE').length}/${o.ba_checklist.length} terisi`,
                 o.ba_checklist.every(i => i.status === 'DONE') ? 'success' : 'warn')) : ''}
 
-          ${collapsibleCard('sec-bukti', 'bi-camera', 'Hasil Pekerjaan Teknisi',
+          ${collapsibleCard('sec-bukti', 'bi-camera', 'Bukti Tambahan (Di Luar Checklist BA)',
               workProofGallery(o.bukti_pekerjaan),
               countBadge(`${(o.bukti_pekerjaan||[]).length} file`))}
 
