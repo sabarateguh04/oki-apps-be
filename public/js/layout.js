@@ -80,18 +80,24 @@ function renderLayout({ active, title }) {
    - Real-time: socket event 'notification' (di-emit backend dari titik
      yang sama, lihat logTimeline() di order.route.js)
 
-   Badge counter pakai localStorage 'oki_notif_last_seen' (timestamp
-   terakhir kali bell dibuka) -- bukan per-akun di server, cukup per
-   browser. Dibuka sekali -> semua tertandai "sudah dilihat".
+   Status "sudah dibaca" dan "clear" itu MURNI kosmetik di browser
+   (localStorage), gak nyentuh data asli di server -- Timeline Pekerjaan
+   di halaman detail order tetap utuh walau notifikasinya di-clear di sini:
+   - oki_notif_read_ids     -> array id yang udah ditandai dibaca
+   - oki_notif_cleared_before -> timestamp; notif lebih lama dari ini
+     disembunyikan dari daftar (dianggap "sudah di-clear")
 ============================================ */
 
-const NOTIF_LAST_SEEN_KEY = 'oki_notif_last_seen';
+const NOTIF_READ_IDS_KEY = 'oki_notif_read_ids';
+const NOTIF_CLEARED_BEFORE_KEY = 'oki_notif_cleared_before';
+const NOTIF_MAX_READ_IDS = 300;
 
 let _notifList = [];
-let _notifUnseenCount = 0;
 let _notifDropdownOpen = false;
 let _notifSocket = null;
 let _audioCtx = null;
+let _notifReminderIntervalId = null;
+let _notifStylesInjected = false;
 
 const NOTIF_EVENT_ICON = {
   CREATED: 'bi-plus-circle', APPROVED: 'bi-check2-circle', REJECTED: 'bi-x-circle',
@@ -100,23 +106,36 @@ const NOTIF_EVENT_ICON = {
 };
 function notifIcon(eventType) { return NOTIF_EVENT_ICON[eventType] || 'bi-bell'; }
 
+function _getReadIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(NOTIF_READ_IDS_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function _saveReadIds(set) {
+  let arr = [...set];
+  if (arr.length > NOTIF_MAX_READ_IDS) arr = arr.slice(arr.length - NOTIF_MAX_READ_IDS);
+  localStorage.setItem(NOTIF_READ_IDS_KEY, JSON.stringify(arr));
+}
+function _isNotifRead(id) { return _getReadIds().has(String(id)); }
+
 function notifBellHtml() {
   return `
     <div style="position:relative;">
       <button id="notif-bell-btn" onclick="toggleNotifDropdown(); return false;"
               style="background:none;border:none;position:relative;font-size:19px;color:#495057;padding:6px;cursor:pointer;">
-        <i class="bi bi-bell"></i>
+        <i id="notif-bell-icon" class="bi bi-bell"></i>
         <span id="notif-badge" style="display:none;position:absolute;top:0;right:0;background:#dc3545;color:#fff;
               font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;
               display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1;"></span>
       </button>
-      <div id="notif-dropdown" style="display:none;position:absolute;right:0;top:38px;width:340px;max-height:400px;
-           overflow-y:auto;background:#fff;border:1px solid #e9ecef;border-radius:12px;
-           box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:1050;">
-        <div style="padding:10px 14px;border-bottom:1px solid #f1f3f5;font-weight:700;font-size:13px;">
-          Notifikasi
+      <div id="notif-dropdown" style="display:none;position:absolute;right:0;top:38px;width:340px;max-height:440px;
+           display:none;flex-direction:column;background:#fff;border:1px solid #e9ecef;border-radius:12px;
+           box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:1050;overflow:hidden;">
+        <div style="padding:10px 14px;border-bottom:1px solid #f1f3f5;display:flex;align-items:center;gap:8px;">
+          <span style="font-weight:700;font-size:13px;flex-grow:1;">Notifikasi</span>
+          <a href="#" onclick="markAllNotifRead(); return false;" style="font-size:11px;color:#2563EB;text-decoration:none;">Tandai dibaca</a>
+          <a href="#" onclick="clearAllNotif(); return false;" style="font-size:11px;color:#dc3545;text-decoration:none;">Hapus semua</a>
         </div>
-        <div id="notif-list-body" style="padding:6px;">
+        <div id="notif-list-body" style="padding:6px;overflow-y:auto;max-height:390px;">
           <div class="text-muted small text-center py-3">Memuat...</div>
         </div>
       </div>
@@ -125,6 +144,7 @@ function notifBellHtml() {
 }
 
 function initNotifBell() {
+  injectNotifStyles();
   loadNotifHistory();
   connectNotifSocket();
   document.addEventListener('click', (e) => {
@@ -140,17 +160,13 @@ function initNotifBell() {
 async function loadNotifHistory() {
   try {
     const d = await api('/api/dashboard/notifications?limit=30');
-    _notifList = d.notifications || [];
-    const lastSeenRaw = localStorage.getItem(NOTIF_LAST_SEEN_KEY);
-    if (!lastSeenRaw) {
-      // Pertama kali pernah buka -- riwayat lama gak dianggap "baru",
-      // biar badge gak langsung penuh nampilin history lama sekaligus.
-      localStorage.setItem(NOTIF_LAST_SEEN_KEY, new Date().toISOString());
-      _notifUnseenCount = 0;
-    } else {
-      const lastSeen = new Date(lastSeenRaw).getTime();
-      _notifUnseenCount = _notifList.filter(n => new Date(n.created_at.replace(' ', 'T')).getTime() > lastSeen).length;
+    const clearedBefore = localStorage.getItem(NOTIF_CLEARED_BEFORE_KEY);
+    let list = d.notifications || [];
+    if (clearedBefore) {
+      const clearedTs = new Date(clearedBefore).getTime();
+      list = list.filter(n => new Date(n.created_at.replace(' ', 'T')).getTime() > clearedTs);
     }
+    _notifList = list;
     updateNotifBadge();
     renderNotifList();
   } catch (e) {
@@ -187,28 +203,103 @@ function handleIncomingNotification(n) {
     actor_type: n.actorType,
     created_at: n.createdAt,
   };
+  // Kalau dropdown lagi kebuka pas notif baru masuk, anggap langsung
+  // "dilihat" -- gak perlu nambahin ke unread count.
+  if (_notifDropdownOpen) {
+    const ids = _getReadIds();
+    ids.add(String(normalized.id));
+    _saveReadIds(ids);
+  }
   _notifList.unshift(normalized);
   if (_notifList.length > 50) _notifList.length = 50;
 
-  if (_notifDropdownOpen) {
-    localStorage.setItem(NOTIF_LAST_SEEN_KEY, new Date().toISOString());
-  } else {
-    _notifUnseenCount++;
-    updateNotifBadge();
-  }
+  updateNotifBadge();
   renderNotifList();
   playNotifSound();
 }
 
+function injectNotifStyles() {
+  if (_notifStylesInjected || document.getElementById('notif-bell-styles')) return;
+  _notifStylesInjected = true;
+  const style = document.createElement('style');
+  style.id = 'notif-bell-styles';
+  style.textContent = `
+    @keyframes notifBellBlink {
+      0%, 100% { color: #495057; transform: scale(1); }
+      50% { color: #dc3545; transform: scale(1.18); }
+    }
+    .notif-bell-blink { animation: notifBellBlink 1s ease-in-out infinite; }
+  `;
+  document.head.appendChild(style);
+}
+
 function updateNotifBadge() {
   const badge = document.getElementById('notif-badge');
-  if (!badge) return;
-  if (_notifUnseenCount > 0) {
-    badge.textContent = _notifUnseenCount > 99 ? '99+' : _notifUnseenCount;
-    badge.style.display = 'flex';
-  } else {
-    badge.style.display = 'none';
+  const icon = document.getElementById('notif-bell-icon');
+  const unreadCount = _notifList.filter(n => !_isNotifRead(n.id)).length;
+
+  if (badge) {
+    if (unreadCount > 0) {
+      badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
   }
+
+  // Ikon bell kedip-kedip TERUS selama masih ada yang belum dibaca --
+  // berhenti otomatis begitu unreadCount balik ke 0 (semua udah dibaca).
+  if (icon) {
+    icon.classList.toggle('notif-bell-blink', unreadCount > 0);
+  }
+
+  // Reminder: tiap 30 detik, bunyi beda selama MASIH ada yang belum
+  // dibaca. Timer cuma di-start sekali (gak di-reset tiap notif baru
+  // masuk) dan otomatis berhenti begitu unreadCount == 0.
+  if (unreadCount > 0 && !_notifReminderIntervalId) {
+    _notifReminderIntervalId = setInterval(() => {
+      const stillUnread = _notifList.filter(n => !_isNotifRead(n.id)).length;
+      if (stillUnread > 0) {
+        playReminderSound();
+      } else {
+        clearInterval(_notifReminderIntervalId);
+        _notifReminderIntervalId = null;
+      }
+    }, 30000);
+  } else if (unreadCount === 0 && _notifReminderIntervalId) {
+    clearInterval(_notifReminderIntervalId);
+    _notifReminderIntervalId = null;
+  }
+}
+
+/* Tandai SATU notifikasi udah dibaca -- dipanggil pas item-nya diklik
+   (sebelum browser pindah ke halaman order-detail tujuannya). */
+function markNotifRead(id) {
+  const ids = _getReadIds();
+  ids.add(String(id));
+  _saveReadIds(ids);
+  updateNotifBadge();
+  renderNotifList();
+}
+
+function markAllNotifRead() {
+  const ids = _getReadIds();
+  _notifList.forEach(n => ids.add(String(n.id)));
+  _saveReadIds(ids);
+  updateNotifBadge();
+  renderNotifList();
+}
+
+/* "Hapus Semua" -- cuma bersihin TAMPILAN dropdown, data asli di
+   Timeline Pekerjaan order tetap ada (gak ada DELETE ke server). Notif
+   baru yang masuk SETELAH ini tetap muncul seperti biasa. */
+function clearAllNotif() {
+  if (!_notifList.length) return;
+  if (!confirm('Hapus semua notifikasi dari daftar ini? (Riwayat di halaman detail order tetap tersimpan)')) return;
+  localStorage.setItem(NOTIF_CLEARED_BEFORE_KEY, new Date().toISOString());
+  _notifList = [];
+  updateNotifBadge();
+  renderNotifList();
 }
 
 function notifItemText(n) {
@@ -228,15 +319,19 @@ function renderNotifList() {
   }
   body.innerHTML = _notifList.map(n => {
     const { header, body: text } = notifItemText(n);
+    const unread = !_isNotifRead(n.id);
     return `
-      <a href="order-detail?id=${n.order_id}" style="display:flex;gap:10px;padding:9px 8px;border-radius:8px;
-         text-decoration:none;color:inherit;" onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='transparent'">
+      <a href="order-detail?id=${n.order_id}" onclick="markNotifRead('${n.id}')"
+         style="display:flex;gap:10px;padding:9px 8px;border-radius:8px;
+         text-decoration:none;color:inherit;background:${unread ? '#eef4ff' : 'transparent'};"
+         onmouseover="this.style.background='#f8f9fb'" onmouseout="this.style.background='${unread ? '#eef4ff' : 'transparent'}'">
         <div style="width:30px;height:30px;border-radius:50%;background:#eef1f6;flex-shrink:0;
-             display:flex;align-items:center;justify-content:center;color:#495057;font-size:14px;">
+             display:flex;align-items:center;justify-content:center;color:#495057;font-size:14px;position:relative;">
           <i class="bi ${notifIcon(n.event_type)}"></i>
+          ${unread ? '<span style="position:absolute;top:-1px;right:-1px;width:8px;height:8px;border-radius:50%;background:#2563EB;border:1.5px solid #fff;"></span>' : ''}
         </div>
         <div style="min-width:0;flex:1;">
-          <div style="font-size:12.5px;font-weight:700;color:#212529;">${escapeHtml(header)}</div>
+          <div style="font-size:12.5px;font-weight:${unread ? 700 : 500};color:#212529;">${escapeHtml(header)}</div>
           <div style="font-size:12px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(text)}</div>
           <div style="font-size:10.5px;color:#adb5bd;margin-top:2px;">${relTime(n.created_at)}</div>
         </div>
@@ -252,11 +347,8 @@ function toggleNotifDropdown() {
 function openNotifDropdown() {
   const dropdown = document.getElementById('notif-dropdown');
   if (!dropdown) return;
-  dropdown.style.display = 'block';
+  dropdown.style.display = 'flex';
   _notifDropdownOpen = true;
-  _notifUnseenCount = 0;
-  localStorage.setItem(NOTIF_LAST_SEEN_KEY, new Date().toISOString());
-  updateNotifBadge();
 }
 
 function closeNotifDropdown() {
@@ -264,6 +356,34 @@ function closeNotifDropdown() {
   if (!dropdown) return;
   dropdown.style.display = 'none';
   _notifDropdownOpen = false;
+}
+
+/* Bunyi REMINDER (tiap 30 detik selama masih ada notif belum dibaca) --
+   sengaja dibikin BEDA dari bunyi notif baru: 3 beep pendek nada rendah
+   yang sama (kayak "masih nunggu, masih nunggu, masih nunggu"), bukan
+   2 nada naik kayak playNotifSound() (yang artinya "ada yang baru masuk"). */
+function playReminderSound() {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+    [0, 1, 2].forEach(i => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = 523;
+      const start = now + i * 0.16;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.14);
+    });
+  } catch (e) {
+    // Audio gagal (browser block dsb) -- diamkan, jangan ganggu app.
+  }
 }
 
 /* Bunyi notifikasi pakai Web Audio API (2 nada singkat) -- gak perlu
