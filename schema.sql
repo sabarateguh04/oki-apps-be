@@ -360,3 +360,11 @@ INSERT INTO oki_customer_sites
 
 INSERT INTO oki_technicians (username, password, nama, no_hp, email, skill) VALUES
   ('teknisi1', '$2b$10$.gI0Q57pTsFDt0cbQBpDb.qq2m6KPafkaQOBaQwnpp1uIbUcXnM62', 'Andi Wijaya', '081212121212', 'andi@email.com', 'Elektrikal');
+
+  
+ALTER TABLE oki_order_timeline
+  ADD COLUMN notif_roles VARCHAR(100) NULL AFTER actor_id;
+ 
+ALTER TABLE oki_order_timeline
+  ADD INDEX idx_timeline_created (created_at);
+ 

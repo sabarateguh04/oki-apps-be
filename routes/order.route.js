@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { getAssignEligibility } = require('../helpers/assignEligibility');
-const { emitToDashboard, emitToTechnician } = require('../socket');
+const { emitToDashboard, emitToTechnician, emitToDashboardRoles } = require('../socket');
 const { requireAuth, requireRole, requireTechnician } = require('../middleware/auth');
 const { handleUploadMultiple, publicUrlFor } = require('../middleware/upload');
 const { sendPushToTechnician } = require('../push');
@@ -9,28 +9,50 @@ const { sendPushToTechnician } = require('../push');
 const router = express.Router();
 router.use(requireAuth);
 
+/* Siapa yang perlu tau tiap jenis event -- "siapa yang perlu ACT
+   selanjutnya", bukan siapa yang baru aja ngelakuin aksinya (pelaku gak
+   perlu dinotifikasi soal aksinya sendiri). Dipakai sebagai fallback di
+   logTimeline() kalau targetRoles gak di-override manual pas manggil.
+   Array kosong [] artinya sengaja gak ada yang dinotifikasi (biar gak
+   spam untuk event yang gak butuh aksi lanjutan dari staff lain, misal
+   upload bukti kerja / isi 1 item checklist BA). */
+const NOTIF_ROLE_MAP = {
+  CREATED:     ['ATASAN'],           // order baru -> nunggu approval atasan
+  APPROVED:    ['ADMIN', 'FINANCE'], // admin lanjut assign, finance mulai bisa TF/beli
+  REJECTED:    ['ADMIN'],            // creator perlu tau order ditolak
+  ASSIGNED:    [],                   // teknisi udah dinotif jalur terpisah, staff lain gak urgent
+  ON_THE_WAY:  ['ADMIN'],
+  IN_PROGRESS: ['ADMIN'],
+  DONE:        ['ADMIN', 'FINANCE'], // admin bisa close, finance bisa TF biaya SESUDAH
+  CANCELLED:   ['ADMIN', 'ATASAN'],
+  NOTE:        [], // default skip -- override manual per pemanggilan kalau perlu
+};
+
 /* Helper: tulis satu baris ke order_timeline (log aktivitas) SEKALIGUS
-   broadcast notifikasi real-time ke semua staff yang lagi buka dashboard
-   (room 'dashboard'). Ini SATU-SATUNYA titik notifikasi disebar, karena
-   logTimeline() ini udah dipanggil di hampir semua aksi order (approve,
-   reject, assign, status ON_THE_WAY/IN_PROGRESS/DONE/CANCELLED, checklist
-   BA, kebutuhan dibeli, biaya ditransfer, dst) -- jadi gak perlu nambahin
-   emit satu-satu di tiap endpoint.
+   broadcast notifikasi real-time ke role yang RELEVAN (bukan broadcast
+   ke semua staff). Ini SATU-SATUNYA titik notifikasi disebar, karena
+   logTimeline() ini udah dipanggil di hampir semua aksi order.
+   targetRoles: array role string (override manual). Kalau gak dikasih
+   (undefined/null), fallback ke NOTIF_ROLE_MAP[eventType] -- atau ['ADMIN']
+   kalau eventType-nya gak dikenal di map itu.
    Riwayat notifikasi juga dibaca LANGSUNG dari oki_order_timeline (lihat
-   GET /api/dashboard/notifications) -- gak ada tabel notifikasi terpisah,
-   biar single source of truth & gak ada resiko datanya beda. */
-async function logTimeline(orderId, eventType, note, actorType = 'SYSTEM', actorId = null) {
+   GET /api/dashboard/notifications) -- gak ada tabel notifikasi terpisah. */
+async function logTimeline(orderId, eventType, note, actorType = 'SYSTEM', actorId = null, targetRoles = null) {
+  const roles = targetRoles !== null ? targetRoles : (NOTIF_ROLE_MAP[eventType] ?? ['ADMIN']);
+
   await pool.query(
-    `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id) VALUES (?, ?, ?, ?, ?)`,
-    [orderId, eventType, note || null, actorType, actorId],
+    `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id, notif_roles) VALUES (?, ?, ?, ?, ?, ?)`,
+    [orderId, eventType, note || null, actorType, actorId, roles.length ? roles.join(',') : null],
   );
+
+  if (!roles.length) return; // sengaja gak ada yang perlu dinotif buat event ini
 
   try {
     const [[ctx]] = await pool.query(
       `SELECT o.order_no, c.nama_perusahaan FROM oki_orders o JOIN oki_customers c ON c.id = o.customer_id WHERE o.id = ?`,
       [orderId],
     );
-    emitToDashboard('notification', {
+    emitToDashboardRoles(roles, 'notification', {
       orderId: Number(orderId),
       orderNo: ctx?.order_no || null,
       customerName: ctx?.nama_perusahaan || null,
@@ -401,14 +423,14 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
     await snapshotBaChecklist(conn, orderId, customer_id);
 
     await conn.query(
-      `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id) VALUES (?, 'CREATED', ?, 'USER', ?)`,
-      [orderId, `Order ${orderNo} dibuat`, req.user.id],
+      `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id, notif_roles) VALUES (?, 'CREATED', ?, 'USER', ?, ?)`,
+      [orderId, `Order ${orderNo} dibuat`, req.user.id, NOTIF_ROLE_MAP.CREATED.join(',')],
     );
 
     await conn.commit();
     emitToDashboard('order-created', { orderId, orderNo });
     const [[custRow]] = await pool.query(`SELECT nama_perusahaan FROM oki_customers WHERE id = ?`, [customer_id]);
-    emitToDashboard('notification', {
+    emitToDashboardRoles(NOTIF_ROLE_MAP.CREATED, 'notification', {
       orderId,
       orderNo,
       customerName: custRow?.nama_perusahaan || null,
@@ -590,7 +612,7 @@ router.post('/:id/respond', requireTechnician, async (req, res) => {
 
     const [[tech]] = await pool.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
     const msg = response === 'ACCEPTED' ? `${tech.nama} menerima tawaran tugas` : `${tech.nama} menolak tawaran tugas`;
-    await logTimeline(req.params.id, 'NOTE', msg, 'TECHNICIAN', req.user.id);
+    await logTimeline(req.params.id, 'NOTE', msg, 'TECHNICIAN', req.user.id, ['ADMIN']);
     emitToDashboard('order-updated', { orderId: Number(req.params.id) });
 
     return res.json({ success: true, message: response === 'ACCEPTED' ? 'Tugas diterima' : 'Tugas ditolak' });
@@ -735,7 +757,7 @@ router.post('/:id/kebutuhan/:kebutuhanId/dibeli', requireRole('FINANCE'), handle
       urls = saved.map(s => s.url);
       await conn.query(`UPDATE oki_order_kebutuhan SET bukti_url = ? WHERE id = ?`, [urls[0], req.params.kebutuhanId]);
     }
-    await logTimeline(req.params.id, 'NOTE', 'Finance menandai 1 kebutuhan pra-assign sudah dibeli', 'USER', req.user.id);
+    await logTimeline(req.params.id, 'NOTE', 'Finance menandai 1 kebutuhan pra-assign sudah dibeli', 'USER', req.user.id, ['ADMIN']);
     emitToDashboard('order-updated', { orderId: Number(req.params.id) });
     return res.json({ success: true, message: 'Kebutuhan ditandai selesai dibeli', files: urls });
   } catch (e) {
@@ -785,7 +807,7 @@ router.post('/:id/biaya/:biayaId/bayar', requireRole('FINANCE'), handleUploadMul
         urls = saved.map(s => s.url);
       }
       await conn.query(`UPDATE oki_order_biaya SET status='DONE', paid_by=?, paid_at=NOW() WHERE id = ?`, [req.user.id, req.params.biayaId]);
-      await logTimeline(req.params.id, 'NOTE', `Finance transfer biaya ${biaya.jenis} (${biaya.deskripsi || '-'}) selesai`, 'USER', req.user.id);
+      await logTimeline(req.params.id, 'NOTE', `Finance transfer biaya ${biaya.jenis} (${biaya.deskripsi || '-'}) selesai`, 'USER', req.user.id, ['ADMIN']);
       emitToDashboard('order-updated', { orderId: Number(req.params.id) });
       return res.json({ success: true, message: 'Biaya ditandai selesai ditransfer', files: urls });
     } finally {

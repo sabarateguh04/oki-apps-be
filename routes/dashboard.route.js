@@ -91,14 +91,20 @@ router.get('/monitoring', async (req, res) => {
    halaman dibuka/refresh, biar riwayatnya gak hilang -- update
    real-time selanjutnya lewat socket event 'notification').
 
+   Difilter sesuai ROLE staff yang lagi login (FIND_IN_SET terhadap
+   kolom notif_roles) -- SAMA PERSIS kayak targeting real-time di
+   order.route.js, biar konsisten: role yang gak relevan gak akan lihat
+   notifikasi yang bukan buat mereka, baik live maupun riwayat.
+
    Sumbernya LANGSUNG dari oki_order_timeline -- gak ada tabel
    notifikasi terpisah, karena baris yang sama juga dipakai buat
-   Timeline Pekerjaan di halaman detail order. Cakupannya cuma
-   event seputar order (approve/reject/assign/status/checklist BA/
-   kebutuhan/biaya/dll) -- sesuai scope yang diminta.
+   Timeline Pekerjaan di halaman detail order.
 ═══════════════════════════════════════════════════ */
 router.get('/notifications', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 100);
+  if (req.user.type !== 'staff' || !req.user.role) {
+    return res.json({ success: true, notifications: [] });
+  }
   try {
     const [rows] = await pool.query(
       `SELECT ot.id, ot.order_id, o.order_no, c.nama_perusahaan AS customer_name,
@@ -106,9 +112,10 @@ router.get('/notifications', async (req, res) => {
        FROM oki_order_timeline ot
        JOIN oki_orders o ON o.id = ot.order_id
        JOIN oki_customers c ON c.id = o.customer_id
+       WHERE FIND_IN_SET(?, ot.notif_roles)
        ORDER BY ot.created_at DESC
        LIMIT ?`,
-      [limit],
+      [req.user.role, limit],
     );
     return res.json({ success: true, notifications: rows });
   } catch (e) {

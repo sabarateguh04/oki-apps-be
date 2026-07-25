@@ -88,9 +88,18 @@ function renderLayout({ active, title }) {
      disembunyikan dari daftar (dianggap "sudah di-clear")
 ============================================ */
 
-const NOTIF_READ_IDS_KEY = 'oki_notif_read_ids';
-const NOTIF_CLEARED_BEFORE_KEY = 'oki_notif_cleared_before';
+const NOTIF_READ_IDS_BASE = 'oki_notif_read_ids';
+const NOTIF_CLEARED_BEFORE_BASE = 'oki_notif_cleared_before';
 const NOTIF_MAX_READ_IDS = 300;
+
+/* Scope localStorage per AKUN yang login (bukan per browser secara
+   umum) -- biar kalau ganti akun di browser yang sama, status "sudah
+   dibaca"/"di-clear" gak ikut kebawa dari akun sebelumnya. */
+function _notifStorageKey(base) {
+  const s = getSession();
+  const uid = s ? `${s.type}-${s.id}` : 'anon';
+  return `${base}:${uid}`;
+}
 
 let _notifList = [];
 let _notifDropdownOpen = false;
@@ -107,13 +116,13 @@ const NOTIF_EVENT_ICON = {
 function notifIcon(eventType) { return NOTIF_EVENT_ICON[eventType] || 'bi-bell'; }
 
 function _getReadIds() {
-  try { return new Set(JSON.parse(localStorage.getItem(NOTIF_READ_IDS_KEY) || '[]')); }
+  try { return new Set(JSON.parse(localStorage.getItem(_notifStorageKey(NOTIF_READ_IDS_BASE)) || '[]')); }
   catch (_) { return new Set(); }
 }
 function _saveReadIds(set) {
   let arr = [...set];
   if (arr.length > NOTIF_MAX_READ_IDS) arr = arr.slice(arr.length - NOTIF_MAX_READ_IDS);
-  localStorage.setItem(NOTIF_READ_IDS_KEY, JSON.stringify(arr));
+  localStorage.setItem(_notifStorageKey(NOTIF_READ_IDS_BASE), JSON.stringify(arr));
 }
 function _isNotifRead(id) { return _getReadIds().has(String(id)); }
 
@@ -160,7 +169,7 @@ function initNotifBell() {
 async function loadNotifHistory() {
   try {
     const d = await api('/api/dashboard/notifications?limit=30');
-    const clearedBefore = localStorage.getItem(NOTIF_CLEARED_BEFORE_KEY);
+    const clearedBefore = localStorage.getItem(_notifStorageKey(NOTIF_CLEARED_BEFORE_BASE));
     let list = d.notifications || [];
     if (clearedBefore) {
       const clearedTs = new Date(clearedBefore).getTime();
@@ -185,7 +194,10 @@ function connectNotifSocket() {
 function _startNotifSocket() {
   if (_notifSocket) return;
   _notifSocket = window.io();
-  _notifSocket.on('connect', () => _notifSocket.emit('register-dashboard'));
+  _notifSocket.on('connect', () => {
+    const session = getSession();
+    _notifSocket.emit('register-dashboard', { role: session ? session.role : null });
+  });
   _notifSocket.on('notification', handleIncomingNotification);
 }
 
@@ -296,7 +308,7 @@ function markAllNotifRead() {
 function clearAllNotif() {
   if (!_notifList.length) return;
   if (!confirm('Hapus semua notifikasi dari daftar ini? (Riwayat di halaman detail order tetap tersimpan)')) return;
-  localStorage.setItem(NOTIF_CLEARED_BEFORE_KEY, new Date().toISOString());
+  localStorage.setItem(_notifStorageKey(NOTIF_CLEARED_BEFORE_BASE), new Date().toISOString());
   _notifList = [];
   updateNotifBadge();
   renderNotifList();
