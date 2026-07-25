@@ -86,6 +86,38 @@ router.get('/monitoring', async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════
+   GET /api/dashboard/notifications?limit=30
+   Riwayat notifikasi buat bell icon di topbar (dipanggil sekali pas
+   halaman dibuka/refresh, biar riwayatnya gak hilang -- update
+   real-time selanjutnya lewat socket event 'notification').
+
+   Sumbernya LANGSUNG dari oki_order_timeline -- gak ada tabel
+   notifikasi terpisah, karena baris yang sama juga dipakai buat
+   Timeline Pekerjaan di halaman detail order. Cakupannya cuma
+   event seputar order (approve/reject/assign/status/checklist BA/
+   kebutuhan/biaya/dll) -- sesuai scope yang diminta.
+═══════════════════════════════════════════════════ */
+router.get('/notifications', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 30, 100);
+  try {
+    const [rows] = await pool.query(
+      `SELECT ot.id, ot.order_id, o.order_no, c.nama_perusahaan AS customer_name,
+              ot.event_type, ot.note, ot.actor_type, ot.actor_id, ot.created_at
+       FROM oki_order_timeline ot
+       JOIN oki_orders o ON o.id = ot.order_id
+       JOIN oki_customers c ON c.id = o.customer_id
+       ORDER BY ot.created_at DESC
+       LIMIT ?`,
+      [limit],
+    );
+    return res.json({ success: true, notifications: rows });
+  } catch (e) {
+    console.error('[DASHBOARD notifications]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/* ═══════════════════════════════════════════════════
    GET /api/dashboard/analytics
    Area 3: Analitik — order per bulan, performa teknisi, SLA/waktu
    penyelesaian.

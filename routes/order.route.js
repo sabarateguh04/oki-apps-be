@@ -9,12 +9,41 @@ const { sendPushToTechnician } = require('../push');
 const router = express.Router();
 router.use(requireAuth);
 
-/* Helper: tulis satu baris ke order_timeline (log aktivitas) */
+/* Helper: tulis satu baris ke order_timeline (log aktivitas) SEKALIGUS
+   broadcast notifikasi real-time ke semua staff yang lagi buka dashboard
+   (room 'dashboard'). Ini SATU-SATUNYA titik notifikasi disebar, karena
+   logTimeline() ini udah dipanggil di hampir semua aksi order (approve,
+   reject, assign, status ON_THE_WAY/IN_PROGRESS/DONE/CANCELLED, checklist
+   BA, kebutuhan dibeli, biaya ditransfer, dst) -- jadi gak perlu nambahin
+   emit satu-satu di tiap endpoint.
+   Riwayat notifikasi juga dibaca LANGSUNG dari oki_order_timeline (lihat
+   GET /api/dashboard/notifications) -- gak ada tabel notifikasi terpisah,
+   biar single source of truth & gak ada resiko datanya beda. */
 async function logTimeline(orderId, eventType, note, actorType = 'SYSTEM', actorId = null) {
   await pool.query(
     `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id) VALUES (?, ?, ?, ?, ?)`,
     [orderId, eventType, note || null, actorType, actorId],
   );
+
+  try {
+    const [[ctx]] = await pool.query(
+      `SELECT o.order_no, c.nama_perusahaan FROM oki_orders o JOIN oki_customers c ON c.id = o.customer_id WHERE o.id = ?`,
+      [orderId],
+    );
+    emitToDashboard('notification', {
+      orderId: Number(orderId),
+      orderNo: ctx?.order_no || null,
+      customerName: ctx?.nama_perusahaan || null,
+      eventType,
+      note: note || null,
+      actorType,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // Gagal broadcast notifikasi TIDAK boleh bikin aksi utamanya gagal --
+    // timeline-nya udah tersimpan di atas, ini cuma "bonus" real-time push.
+    console.error('[NOTIF emit]', e.message);
+  }
 }
 
 async function countPendingKebutuhan(orderId) {
@@ -378,6 +407,25 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
 
     await conn.commit();
     emitToDashboard('order-created', { orderId, orderNo });
+    const [[custRow]] = await pool.query(`SELECT nama_perusahaan FROM oki_customers WHERE id = ?`, [customer_id]);
+    emitToDashboard('notification', {
+      orderId,
+      orderNo,
+      customerName: custRow?.nama_perusahaan || null,
+      eventType: 'CREATED',
+      note: `Order ${orderNo} dibuat`,
+      actorType: 'USER',
+      createdAt: new Date().toISOString(),
+    });
+    emitToDashboard('notification', {
+      orderId,
+      orderNo,
+      customerName: null,
+      eventType: 'CREATED',
+      note: `Order ${orderNo} dibuat`,
+      actorType: 'USER',
+      createdAt: new Date().toISOString(),
+    });
     return res.json({ success: true, orderId, orderNo });
   } catch (e) {
     await conn.rollback();
