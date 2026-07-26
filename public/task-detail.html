@@ -15,6 +15,7 @@
   .biaya-row-tech{ border:1px solid #eee; border-radius:10px; padding:10px; margin-bottom:8px; }
   .ba-check-item{ border:1px solid #eee; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
   .ba-check-item.done{ background:#f4fbf6; border-color:#c8e9d3; }
+  .ba-check-item.revision{ background:#fff5f5; border-color:#f5c2c7; }
   .ba-cat-badge{ background:#eef1f6; border-radius:8px; padding:2px 8px; font-size:11px; font-weight:600; }
 </style>
 </head>
@@ -69,12 +70,17 @@
         </div>
         <div class="card-body">
           ${items.map(it => `
-            <div class="ba-check-item ${it.status === 'DONE' ? 'done' : ''}" id="ba-item-${it.id}">
+            <div class="ba-check-item ${it.status === 'DONE' ? 'done' : it.revision_note ? 'revision' : ''}" id="ba-item-${it.id}">
               <div class="d-flex align-items-start gap-2 flex-wrap">
                 <span class="ba-cat-badge">${escapeHtml(it.category)}</span>
                 <div class="flex-grow-1">
                   <div><b>${escapeHtml(it.template_name)}</b> ${it.status === 'DONE' ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</div>
                   ${it.note_ba ? `<div class="text-muted small">${escapeHtml(it.note_ba)}</div>` : ''}
+                  ${it.revision_note ? `
+                    <div class="alert alert-danger py-2 px-3 mt-2 mb-0" style="font-size:12.5px;">
+                      <i class="bi bi-arrow-repeat"></i> <b>Perlu direvisi:</b> ${escapeHtml(it.revision_note)}
+                    </div>
+                  ` : ''}
                   ${it.template_type === 'text' ? `
                     <div class="input-group input-group-sm mt-2" style="max-width:360px;">
                       <input type="text" class="form-control" id="ba-text-${it.id}" placeholder="Masukkan nilai" value="${it.text_value ? escapeHtml(it.text_value) : ''}" ${!canFill ? 'disabled' : ''}>

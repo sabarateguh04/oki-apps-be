@@ -695,6 +695,13 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
     );
     if (!item) return res.status(404).json({ success: false, message: 'Item checklist tidak ditemukan' });
 
+    // Kalau item ini sebelumnya di-flag admin buat direvisi (ada
+    // revision_note), berarti pengisian ini adalah "perbaikan" -- perlu
+    // dikasih tau balik ke Admin biar mereka cek & bisa lanjut close.
+    // Kalau bukan (pengisian pertama biasa), gak perlu notif staff sama
+    // sekali (biar gak spam tiap 1 dari 14 item diisi).
+    const wasRevision = !!item.revision_note;
+
     const conn = await pool.getConnection();
     try {
       if (item.template_type === 'text') {
@@ -704,7 +711,7 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
         }
         await conn.query(
           `UPDATE oki_order_ba_checklist
-           SET status='DONE', text_value=?, filled_by_technician_id=?, filled_at=NOW()
+           SET status='DONE', text_value=?, filled_by_technician_id=?, filled_at=NOW(), revision_note=NULL
            WHERE id = ?`,
           [text_value.trim(), req.user.id, item.id],
         );
@@ -716,14 +723,17 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
         const saved = await saveFiles(conn, req.params.id, 'PEKERJAAN_BA', [req.files[0]], req.user.id, item.id, item.template_name, 'TECHNICIAN');
         await conn.query(
           `UPDATE oki_order_ba_checklist
-           SET status='DONE', file_id=?, filled_by_technician_id=?, filled_at=NOW()
+           SET status='DONE', file_id=?, filled_by_technician_id=?, filled_at=NOW(), revision_note=NULL
            WHERE id = ?`,
           [saved[0].id, req.user.id, item.id],
         );
       }
 
       const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
-      await logTimeline(req.params.id, 'NOTE', `${tech.nama} mengisi checklist BA: ${item.template_name}`, 'TECHNICIAN', req.user.id);
+      const msg = wasRevision
+        ? `${tech.nama} sudah revisi ulang checklist BA: ${item.template_name}`
+        : `${tech.nama} mengisi checklist BA: ${item.template_name}`;
+      await logTimeline(req.params.id, 'NOTE', msg, 'TECHNICIAN', req.user.id, wasRevision ? ['ADMIN'] : []);
       emitToDashboard('order-updated', { orderId: Number(req.params.id) });
       return res.json({ success: true, message: 'Item checklist berhasil diisi' });
     } finally {
@@ -731,6 +741,79 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
     }
   } catch (e) {
     console.error('[ORDER ba-checklist]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/* ═══════════════════════════════════════════════════
+   BARU: POST /api/orders/:id/ba-checklist/:checklistId/revisi — HANYA ADMIN
+   Nge-flag 1 item checklist yang UDAH diisi teknisi (status DONE) tapi
+   ternyata gak sesuai -- balikin status ke PENDING + simpen alasannya di
+   revision_note (WAJIB diisi). Teknisi bakal:
+     - lihat catatan revisi ini di Timeline Pekerjaan (web & app)
+     - dapet push notification + event socket real-time
+     - masih bisa isi ulang item itu lewat endpoint di atas selama order
+       belum di-CLOSE (revision_note otomatis ke-clear pas berhasil isi ulang)
+   Order gak bisa di-CLOSE selama masih ada item checklist BA yang PENDING
+   (lihat POST /:id/close) -- jadi revisi ini otomatis nge-block close
+   sampai teknisi betulin & item-nya DONE lagi.
+   body: { note } (wajib)
+═══════════════════════════════════════════════════ */
+router.post('/:id/ba-checklist/:checklistId/revisi', requireRole('ADMIN'), async (req, res) => {
+  const { note } = req.body;
+  if (!note || !note.trim()) {
+    return res.status(400).json({ success: false, message: 'Keterangan alasan revisi wajib diisi' });
+  }
+  try {
+    const [[order]] = await pool.query(`SELECT status FROM oki_orders WHERE id = ?`, [req.params.id]);
+    if (!order) return res.status(404).json({ success: false, message: 'Order tidak ditemukan' });
+    if (order.status === 'CLOSED') {
+      return res.status(409).json({ success: false, message: 'Order sudah ditutup, tidak bisa direvisi lagi' });
+    }
+
+    const [[item]] = await pool.query(
+      `SELECT * FROM oki_order_ba_checklist WHERE id = ? AND order_id = ?`,
+      [req.params.checklistId, req.params.id],
+    );
+    if (!item) return res.status(404).json({ success: false, message: 'Item checklist tidak ditemukan' });
+    if (item.status !== 'DONE') {
+      return res.status(409).json({ success: false, message: 'Item ini belum diisi teknisi, belum ada yang perlu direvisi' });
+    }
+
+    await pool.query(
+      `UPDATE oki_order_ba_checklist SET status='PENDING', revision_note=? WHERE id = ?`,
+      [note.trim(), item.id],
+    );
+
+    // Log ke timeline (kebaca teknisi juga di Timeline Pekerjaan mereka),
+    // tapi SENGAJA skip notif bell staff -- ini urusan teknisi, bukan staff lain.
+    await logTimeline(
+      req.params.id, 'NOTE',
+      `Admin minta revisi checklist BA "${item.template_name}": ${note.trim()}`,
+      'USER', req.user.id, [],
+    );
+
+    // Push + socket LANGSUNG ke teknisi yang assigned, biar gak cuma
+    // nunggu mereka buka app buat sadar ada yang perlu dibetulin.
+    const [assignedTechs] = await pool.query(
+      `SELECT technician_id FROM oki_order_technicians WHERE order_id = ? AND status = 'ASSIGNED'`,
+      [req.params.id],
+    );
+    for (const t of assignedTechs) {
+      emitToTechnician(t.technician_id, 'ba-revision-requested', {
+        orderId: Number(req.params.id), checklistId: item.id, templateName: item.template_name, note: note.trim(),
+      });
+      sendPushToTechnician(
+        t.technician_id, 'Perlu Revisi Checklist BA',
+        `${item.template_name}: ${note.trim()}`,
+        { orderId: req.params.id, type: 'ba-revision' },
+      );
+    }
+
+    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    return res.json({ success: true, message: 'Item checklist ditandai perlu revisi, teknisi sudah diberi tahu' });
+  } catch (e) {
+    console.error('[ORDER ba-checklist revisi]', e.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -976,6 +1059,16 @@ router.post('/:id/close', requireRole('ADMIN'), async (req, res) => {
     );
     if (pendingBiaya > 0) {
       return res.status(409).json({ success: false, message: `Masih ada ${pendingBiaya} biaya yang belum ditransfer Finance` });
+    }
+
+    // BARU: blokir close kalau masih ada checklist BA yang PENDING --
+    // baik yang emang belum sempat diisi teknisi, MAUPUN yang lagi
+    // ditandai perlu revisi admin (lihat POST .../ba-checklist/:id/revisi).
+    const [[{ pendingBa }]] = await pool.query(
+      `SELECT COUNT(*) AS pendingBa FROM oki_order_ba_checklist WHERE order_id = ? AND status = 'PENDING'`, [req.params.id],
+    );
+    if (pendingBa > 0) {
+      return res.status(409).json({ success: false, message: `Masih ada ${pendingBa} item checklist BA yang belum lengkap/perlu revisi teknisi` });
     }
 
     await pool.query(`UPDATE oki_orders SET status='CLOSED' WHERE id = ?`, [req.params.id]);

@@ -173,13 +173,18 @@
         </button>
         <div class="collapse" id="${collapseId}">
           <div class="p-2">
-            ${list.map(i => `
-              <div class="border rounded-3 p-2 mb-2" style="background:${i.status === 'DONE' ? '#f0fdf4' : '#fafafa'};">
+            ${list.map(i => {
+              const isRevision = i.status === 'PENDING' && i.revision_note;
+              const bg = i.status === 'DONE' ? '#f0fdf4' : isRevision ? '#fff5f5' : '#fafafa';
+              return `
+              <div class="border rounded-3 p-2 mb-2" style="background:${bg};">
                 <div class="d-flex justify-content-between align-items-start gap-2">
                   <div class="fw-semibold small">${escapeHtml(i.template_name)}</div>
                   ${i.status === 'DONE'
                     ? '<span class="badge badge-status-DONE"><i class="bi bi-check-lg"></i> Terisi</span>'
-                    : '<span class="badge badge-approval-PENDING">Belum Diisi</span>'}
+                    : isRevision
+                      ? '<span class="badge" style="background:#dc3545;color:#fff;"><i class="bi bi-arrow-repeat"></i> Perlu Revisi</span>'
+                      : '<span class="badge badge-approval-PENDING">Belum Diisi</span>'}
                 </div>
                 ${i.note_ba ? `<div class="text-muted small mt-1">${escapeHtml(i.note_ba)}</div>` : ''}
                 <div class="mt-2">
@@ -187,13 +192,35 @@
                     ? (i.text_value ? `<code>${escapeHtml(i.text_value)}</code>` : '<span class="text-muted small">-</span>')
                     : (i.file_url ? `<a href="${i.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : '<span class="text-muted small">Belum ada file</span>')}
                 </div>
+                ${isRevision ? `
+                  <div class="alert alert-danger py-2 px-3 mt-2 mb-0" style="font-size:12px;">
+                    <i class="bi bi-arrow-repeat"></i> <b>Menunggu teknisi revisi:</b> ${escapeHtml(i.revision_note)}
+                  </div>
+                ` : i.status === 'DONE' && session.role === 'ADMIN' ? `
+                  <div class="mt-2">
+                    <button class="btn btn-sm btn-outline-danger" onclick="revisiBaItem(${i.id}, '${escapeHtml(i.template_name).replace(/'/g, "\\'")}')">
+                      <i class="bi bi-arrow-repeat"></i> Minta Revisi
+                    </button>
+                  </div>
+                ` : ''}
               </div>
-            `).join('')}
+            `;}).join('')}
           </div>
         </div>
       </div>
     `;
     }).join('');
+  }
+
+  async function revisiBaItem(checklistId, templateName) {
+    const note = prompt(`Kenapa item "${templateName}" perlu direvisi? (jelasin apa yang gak sesuai)`);
+    if (note === null) return;
+    if (!note.trim()) { toast('Keterangan alasan revisi wajib diisi', 'error'); return; }
+    try {
+      await api(`/api/orders/${orderId}/ba-checklist/${checklistId}/revisi`, { method: 'POST', body: JSON.stringify({ note: note.trim() }) });
+      toast('Item ditandai perlu revisi, teknisi sudah diberi tahu', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   /* Helper: 1 card collapsible (collapsed by default) buat kolom kiri.
@@ -270,7 +297,7 @@
               countBadge(`${o.ba_checklist.filter(i => i.status === 'DONE').length}/${o.ba_checklist.length} terisi`,
                 o.ba_checklist.every(i => i.status === 'DONE') ? 'success' : 'warn')) : ''}
 
-          ${collapsibleCard('sec-bukti', 'bi-camera', 'Bukti Tambahan (Di Luar Checklist BA)',
+          ${collapsibleCard('sec-bukti', 'bi-camera', 'Hasil Pekerjaan Teknisi',
               workProofGallery(o.bukti_pekerjaan),
               countBadge(`${(o.bukti_pekerjaan||[]).length} file`))}
 
@@ -339,7 +366,8 @@
     const hasAnyAssigned = assigned.length > 0;
 
     const pendingBiaya = (o.rincian_biaya || []).filter(b => b.status === 'PENDING').length;
-    const closeEligible = o.status === 'DONE' && pendingBiaya === 0;
+    const pendingBa = (o.ba_checklist || []).filter(i => i.status === 'PENDING').length;
+    const closeEligible = o.status === 'DONE' && pendingBiaya === 0 && pendingBa === 0;
 
     return `
       ${canApprove ? `
@@ -423,7 +451,10 @@
           ${o.status === 'DONE' ? (
             closeEligible
               ? `<button class="btn btn-primary" onclick="closeTicket()"><i class="bi bi-check-circle"></i> Tutup Tiket (Close)</button>`
-              : `<div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tutup Tiket masih terkunci</b><br>Masih ada ${pendingBiaya} biaya yang belum ditransfer Finance.</div></div>`
+              : `<div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tutup Tiket masih terkunci</b><br>${[
+                  pendingBiaya > 0 ? `Masih ada ${pendingBiaya} biaya yang belum ditransfer Finance.` : null,
+                  pendingBa > 0 ? `Masih ada ${pendingBa} item checklist BA yang belum lengkap/perlu revisi teknisi.` : null,
+                ].filter(Boolean).join('<br>')}</div></div>`
           ) : ''}
           ${!['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status) ? `<button class="btn btn-outline-danger btn-sm" onclick="updateStatus('CANCELLED')"><i class="bi bi-slash-circle"></i> Batalkan Order</button>` : ''}
           ${['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status) && o.status !== 'DONE' ? `<div class="text-muted small text-center">Tidak ada aksi lagi untuk order berstatus ${o.status}.</div>` : ''}

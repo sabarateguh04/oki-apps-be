@@ -367,4 +367,7 @@ ALTER TABLE oki_order_timeline
  
 ALTER TABLE oki_order_timeline
   ADD INDEX idx_timeline_created (created_at);
- 
+
+
+ALTER TABLE oki_order_ba_checklist
+  ADD COLUMN revision_note VARCHAR(255) NULL AFTER note_ba; 
