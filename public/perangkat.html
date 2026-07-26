@@ -104,6 +104,7 @@
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
+(function () {
   const session = requireAuth(['staff']);
   let modal, perangkatList = [], allSites = [];
 
@@ -228,6 +229,16 @@
       loadPerangkat();
     } catch (e) { toast(e.message, 'error'); }
   }
+
+  // Function yang dipanggil dari onclick="..." di HTML wajib di-expose ke
+  // window karena attribute onclick cuma bisa akses global scope, sedangkan
+  // semua function di atas sekarang ke-scope di dalam IIFE ini.
+  window.openModal = openModal;
+  window.savePerangkat = savePerangkat;
+  window.deletePerangkat = deletePerangkat;
+  window.toggleSiteSelect = toggleSiteSelect;
+  window.loadPerangkat = loadPerangkat;
+})();
 </script>
 </body>
 </html>
