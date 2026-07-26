@@ -118,25 +118,30 @@ async function saveFiles(conn, orderId, kategori, files, uploadedBy, refId = nul
   return urls;
 }
 
-/* BARU: saat order dibuat, kalau customer-nya punya master BA, salin
-   ("snapshot") semua item oki_customers_ba_template jadi baris-baris
-   oki_order_ba_checklist buat order ini -- status semuanya PENDING.
-   Kalau customer gak punya BA, fungsi ini gak ngapa-ngapain (order
-   jalan bebas seperti biasa, gak ada checklist). */
-async function snapshotBaChecklist(conn, orderId, customerId) {
-  const [[ba]] = await conn.query(`SELECT id FROM oki_customers_ba WHERE id_customer = ?`, [customerId]);
-  if (!ba) return; // customer belum punya BA -- normal, skip aja
+/* Snapshot BA sekarang dari SITE (bukan customer lagi) -- karena jumlah
+   & jenis perangkat tiap site beda-beda meski customer-nya sama. Kalau
+   site gak punya BA, fungsi ini gak ngapa-ngapain (order jalan bebas
+   seperti biasa, gak ada checklist). */
+async function snapshotBaChecklist(conn, orderId, siteId) {
+  const [[ba]] = await conn.query(`SELECT id FROM oki_site_ba WHERE id_site = ?`, [siteId]);
+  if (!ba) return; // site belum punya BA -- normal, skip aja
 
   const [templates] = await conn.query(
-    `SELECT * FROM oki_customers_ba_template WHERE id_customers_ba = ? ORDER BY urutan ASC, id ASC`,
+    `SELECT * FROM oki_site_ba_template WHERE id_site_ba = ? ORDER BY urutan ASC, id ASC`,
     [ba.id],
   );
   for (const t of templates) {
+    // BARU: kalau template item ini punya "unit default" (perangkat yang
+    // emang udah terpasang di site ini), otomatis dibawa jadi
+    // expected_perangkat_id di order baru -- jadi buat tiket MAINTENANCE/
+    // GANGGUAN biasa ke site yang sama, admin GAK PERLU assign ulang
+    // manual tiap kali. Teknisi tinggal konfirmasi SN di lapangan seperti
+    // biasa, otomatis kecek cocok/nggak sama unit yang seharusnya ada.
     await conn.query(
       `INSERT INTO oki_order_ba_checklist
-         (order_id, template_id, category, template_name, template_type, note_ba, urutan)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, t.id, t.category, t.template_name, t.template_type, t.note_ba, t.urutan],
+         (order_id, template_id, category, template_name, template_type, note_ba, urutan, expected_perangkat_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, t.id, t.category, t.template_name, t.template_type, t.note_ba, t.urutan, t.default_perangkat_id || null],
     );
   }
 }
@@ -176,11 +181,16 @@ async function getOrderWithEligibility(orderId) {
     `SELECT * FROM oki_order_files WHERE order_id = ? ORDER BY created_at ASC`, [orderId],
   );
   // BARU: checklist BA -- JOIN ke oki_order_files buat dapetin file_url
-  // item yang tipenya 'file' (kalau sudah diisi).
+  // item yang tipenya 'file' (kalau sudah diisi), DAN JOIN ke oki_perangkat
+  // buat nampilin info unit yang di-pre-assign admin (nama + SN yang
+  // SEHARUSNYA dipasang, buat dibandingin sama input teknisi di lapangan).
   const [baChecklist] = await pool.query(
-    `SELECT bc.*, f.file_url
+    `SELECT bc.*, f.file_url,
+            ep.nama_perangkat AS expected_perangkat_name,
+            ep.serial_number AS expected_serial_number
      FROM oki_order_ba_checklist bc
      LEFT JOIN oki_order_files f ON f.id = bc.file_id
+     LEFT JOIN oki_perangkat ep ON ep.id = bc.expected_perangkat_id
      WHERE bc.order_id = ?
      ORDER BY bc.urutan ASC, bc.id ASC`,
     [orderId],
@@ -420,7 +430,7 @@ router.post('/', requireRole('ADMIN'), handleUploadMultiple('files', 15), async 
 
     // BARU: kalau customer ini punya master BA, salin template-nya jadi
     // checklist buat order ini. Kalau gak punya, gak ngapa-ngapain.
-    await snapshotBaChecklist(conn, orderId, customer_id);
+    await snapshotBaChecklist(conn, orderId, site_id);
 
     await conn.query(
       `INSERT INTO oki_order_timeline (order_id, event_type, note, actor_type, actor_id, notif_roles) VALUES (?, 'CREATED', ?, 'USER', ?, ?)`,
@@ -709,12 +719,43 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
         if (!text_value || !text_value.trim()) {
           return res.status(400).json({ success: false, message: 'text_value wajib diisi untuk item ini' });
         }
+        const inputSn = text_value.trim();
+
+        // BARU: kalau item ini di-pre-assign ke 1 unit perangkat spesifik
+        // (admin udah nentuin duluan sebelum teknisi berangkat), cocokkan
+        // SN yang diketik teknisi ke serial_number unit itu.
+        let matchStatus = 'N/A';
+        if (item.expected_perangkat_id) {
+          const [[expected]] = await conn.query(`SELECT serial_number FROM oki_perangkat WHERE id = ?`, [item.expected_perangkat_id]);
+          if (expected) {
+            matchStatus = expected.serial_number.trim().toLowerCase() === inputSn.toLowerCase() ? 'MATCH' : 'MISMATCH';
+            if (matchStatus === 'MATCH') {
+              // Konfirmasi otomatis: unit ini beneran kepasang di site
+              // order ini -- update Master Perangkat jadi TERPAKAI.
+              const [[ord]] = await conn.query(`SELECT site_id FROM oki_orders WHERE id = ?`, [req.params.id]);
+              await conn.query(`UPDATE oki_perangkat SET status='TERPAKAI', site_id=? WHERE id = ?`, [ord.site_id, item.expected_perangkat_id]);
+            }
+          }
+        }
+
         await conn.query(
           `UPDATE oki_order_ba_checklist
-           SET status='DONE', text_value=?, filled_by_technician_id=?, filled_at=NOW(), revision_note=NULL
+           SET status='DONE', text_value=?, filled_by_technician_id=?, filled_at=NOW(), revision_note=NULL,
+               match_status=?, mismatch_note=NULL
            WHERE id = ?`,
-          [text_value.trim(), req.user.id, item.id],
+          [inputSn, req.user.id, matchStatus, item.id],
         );
+
+        // MISMATCH itu kejadian penting -- langsung kasih tau Admin biar
+        // segera direview (beda dari pengisian biasa yang sengaja senyap).
+        if (matchStatus === 'MISMATCH') {
+          const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
+          await logTimeline(
+            req.params.id, 'NOTE',
+            `${tech.nama} input SN "${inputSn}" untuk "${item.template_name}" TIDAK COCOK dengan unit yang di-assign. Perlu direview Admin.`,
+            'TECHNICIAN', req.user.id, ['ADMIN'],
+          );
+        }
       } else {
         // template_type === 'file'
         if (!req.files || !req.files.length) {
@@ -759,6 +800,77 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
    sampai teknisi betulin & item-nya DONE lagi.
    body: { note } (wajib)
 ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   BARU: POST /api/orders/:id/ba-checklist/:checklistId/assign-perangkat
+   — HANYA ADMIN
+   Pre-assign 1 unit perangkat spesifik (dari Master Perangkat, biasanya
+   status TERSEDIA) ke item checklist BA tipe 'text' (SN) SEBELUM teknisi
+   berangkat. Pas teknisi input SN di lapangan, otomatis dicocokkan ke
+   serial_number unit ini (lihat POST .../ba-checklist/:checklistId).
+   body: { perangkat_id }
+═══════════════════════════════════════════════════ */
+router.post('/:id/ba-checklist/:checklistId/assign-perangkat', requireRole('ADMIN'), async (req, res) => {
+  const { perangkat_id } = req.body;
+  if (!perangkat_id) return res.status(400).json({ success: false, message: 'perangkat_id wajib diisi' });
+  try {
+    const [[item]] = await pool.query(
+      `SELECT * FROM oki_order_ba_checklist WHERE id = ? AND order_id = ?`,
+      [req.params.checklistId, req.params.id],
+    );
+    if (!item) return res.status(404).json({ success: false, message: 'Item checklist tidak ditemukan' });
+    if (item.template_type !== 'text') {
+      return res.status(400).json({ success: false, message: 'Pre-assign perangkat cuma berlaku buat item tipe text (SN)' });
+    }
+    const [[perangkat]] = await pool.query(`SELECT id, nama_perangkat FROM oki_perangkat WHERE id = ?`, [perangkat_id]);
+    if (!perangkat) return res.status(404).json({ success: false, message: 'Perangkat tidak ditemukan' });
+
+    await pool.query(`UPDATE oki_order_ba_checklist SET expected_perangkat_id = ? WHERE id = ?`, [perangkat_id, item.id]);
+    return res.json({ success: true, message: `Unit "${perangkat.nama_perangkat}" berhasil di-assign ke item "${item.template_name}"` });
+  } catch (e) {
+    console.error('[ORDER assign-perangkat]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/* ═══════════════════════════════════════════════════
+   BARU: POST /api/orders/:id/ba-checklist/:checklistId/resolve-mismatch
+   — HANYA ADMIN
+   SN yang diinput teknisi gak cocok sama unit yang di-pre-assign, tapi
+   admin mau tetep lanjut Close tiket (misal unit emang udah diganti di
+   lapangan). Wajib kasih keterangan -- begitu di-resolve, item ini
+   gak lagi ngeblokir Close (walau match_status tetep MISMATCH buat
+   histori, mismatch_note yang nandain "udah direview & diterima").
+   body: { note } (wajib)
+═══════════════════════════════════════════════════ */
+router.post('/:id/ba-checklist/:checklistId/resolve-mismatch', requireRole('ADMIN'), async (req, res) => {
+  const { note } = req.body;
+  if (!note || !note.trim()) {
+    return res.status(400).json({ success: false, message: 'Keterangan wajib diisi (misal alasan kenapa unit beda tetap diterima)' });
+  }
+  try {
+    const [[item]] = await pool.query(
+      `SELECT * FROM oki_order_ba_checklist WHERE id = ? AND order_id = ?`,
+      [req.params.checklistId, req.params.id],
+    );
+    if (!item) return res.status(404).json({ success: false, message: 'Item checklist tidak ditemukan' });
+    if (item.match_status !== 'MISMATCH') {
+      return res.status(409).json({ success: false, message: 'Item ini gak dalam status mismatch, gak ada yang perlu di-resolve' });
+    }
+
+    await pool.query(`UPDATE oki_order_ba_checklist SET mismatch_note = ? WHERE id = ?`, [note.trim(), item.id]);
+    await logTimeline(
+      req.params.id, 'NOTE',
+      `Admin resolve mismatch SN "${item.template_name}": ${note.trim()}`,
+      'USER', req.user.id, [],
+    );
+    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    return res.json({ success: true, message: 'Mismatch berhasil di-resolve, order bisa dilanjutkan ke Close' });
+  } catch (e) {
+    console.error('[ORDER resolve-mismatch]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.post('/:id/ba-checklist/:checklistId/revisi', requireRole('ADMIN'), async (req, res) => {
   const { note } = req.body;
   if (!note || !note.trim()) {
@@ -1069,6 +1181,15 @@ router.post('/:id/close', requireRole('ADMIN'), async (req, res) => {
     );
     if (pendingBa > 0) {
       return res.status(409).json({ success: false, message: `Masih ada ${pendingBa} item checklist BA yang belum lengkap/perlu revisi teknisi` });
+    }
+
+    // BARU: blokir close kalau ada SN yang MISMATCH tapi belum di-resolve
+    // admin (mismatch_note masih kosong) -- lihat POST .../resolve-mismatch.
+    const [[{ unresolvedMismatch }]] = await pool.query(
+      `SELECT COUNT(*) AS unresolvedMismatch FROM oki_order_ba_checklist WHERE order_id = ? AND match_status = 'MISMATCH' AND mismatch_note IS NULL`, [req.params.id],
+    );
+    if (unresolvedMismatch > 0) {
+      return res.status(409).json({ success: false, message: `Masih ada ${unresolvedMismatch} SN yang tidak cocok dan belum di-resolve admin` });
     }
 
     await pool.query(`UPDATE oki_orders SET status='CLOSED' WHERE id = ?`, [req.params.id]);

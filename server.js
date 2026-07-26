@@ -13,7 +13,9 @@ const technicianRoute = require('./routes/technician.route');
 const orderRoute      = require('./routes/order.route');
 const dashboardRoute  = require('./routes/dashboard.route');
 const siteRoute       = require('./routes/site.route');
-const customerBaRoute = require('./routes/customer-ba.route');
+// const customerBaRoute = require('./routes/customer-ba.route');
+const siteBaRoute = require('./routes/site-ba.route');
+const perangkatRoute = require('./routes/perangkat.route');
 
 const app = express();
 const PORT = process.env.PORT || 3010;
@@ -27,7 +29,9 @@ app.use('/api/technicians', technicianRoute);
 app.use('/api/orders', orderRoute);
 app.use('/api/dashboard', dashboardRoute);
 app.use('/api/sites', siteRoute);
-app.use('/api/customers/:customerId/ba', customerBaRoute);
+// app.use('/api/customers/:customerId/ba', customerBaRoute);
+app.use('/api/sites/:siteId/ba', siteBaRoute);
+app.use('/api/perangkat', perangkatRoute);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 

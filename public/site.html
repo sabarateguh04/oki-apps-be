@@ -183,6 +183,9 @@
           <td>${s.status_projek === 'ACTIVE' ? '<span class="badge badge-status-DONE">Active</span>' : '<span class="badge badge-approval-PENDING">Non Active</span>'}</td>
           <td>${statusGangguanBadge(s.status_gangguan)}</td>
           <td class="text-end">
+            <a class="btn btn-sm btn-outline-success" href="site-ba?site_id=${s.id}" title="Kelola Master BA">
+              <i class="bi bi-file-earmark-text"></i> BA
+            </a>
             <button class="btn btn-sm btn-outline-primary" onclick="openModal(${s.id})"><i class="bi bi-pencil"></i></button>
             <button class="btn btn-sm btn-outline-danger" onclick="deleteSite(${s.id})"><i class="bi bi-trash"></i></button>
           </td>

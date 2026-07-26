@@ -10,6 +10,7 @@ const ALL_STAFF_NAV = [
   { key: 'customer',  href: 'customer',   icon: 'bi-people',       label: 'Master Customer',  roles: ['ADMIN'] },
   { key: 'site',      href: 'site',       icon: 'bi-geo-alt',      label: 'Master Site',      roles: ['ADMIN'] },
   { key: 'technician',href: 'technician', icon: 'bi-person-badge', label: 'Master Teknisi',   roles: ['ADMIN'] },
+  { key: 'perangkat', href: 'perangkat',  icon: 'bi-hdd-network',  label: 'Master Perangkat', roles: ['ADMIN'] },
 ];
 
 const TECH_NAV = [

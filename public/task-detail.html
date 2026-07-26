@@ -81,6 +81,13 @@
                       <i class="bi bi-arrow-repeat"></i> <b>Perlu direvisi:</b> ${escapeHtml(it.revision_note)}
                     </div>
                   ` : ''}
+                  ${it.match_status === 'MATCH' ? `
+                    <div class="text-success small mt-1"><i class="bi bi-check-circle-fill"></i> SN cocok dengan unit yang seharusnya dipasang.</div>
+                  ` : it.match_status === 'MISMATCH' ? `
+                    <div class="alert alert-warning py-2 px-3 mt-2 mb-0" style="font-size:12.5px;">
+                      <i class="bi bi-exclamation-triangle-fill"></i> <b>SN yang kamu input beda</b> dari unit yang seharusnya dipasang. Admin akan mereview -- kalau memang unit sudah diganti, gak perlu diedit lagi, tunggu konfirmasi admin.
+                    </div>
+                  ` : ''}
                   ${it.template_type === 'text' ? `
                     <div class="input-group input-group-sm mt-2" style="max-width:360px;">
                       <input type="text" class="form-control" id="ba-text-${it.id}" placeholder="Masukkan nilai" value="${it.text_value ? escapeHtml(it.text_value) : ''}" ${!canFill ? 'disabled' : ''}>

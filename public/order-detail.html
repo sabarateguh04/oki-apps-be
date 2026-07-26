@@ -192,6 +192,9 @@
                     ? (i.text_value ? `<code>${escapeHtml(i.text_value)}</code>` : '<span class="text-muted small">-</span>')
                     : (i.file_url ? `<a href="${i.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> Lihat file</a>` : '<span class="text-muted small">Belum ada file</span>')}
                 </div>
+
+                ${i.template_type === 'text' ? renderPerangkatSection(i) : ''}
+
                 ${isRevision ? `
                   <div class="alert alert-danger py-2 px-3 mt-2 mb-0" style="font-size:12px;">
                     <i class="bi bi-arrow-repeat"></i> <b>Menunggu teknisi revisi:</b> ${escapeHtml(i.revision_note)}
@@ -210,6 +213,92 @@
       </div>
     `;
     }).join('');
+  }
+
+  /* Render bagian "Master Perangkat" di bawah 1 item checklist tipe text:
+     - Belum ada unit di-assign & belum diisi teknisi -> tombol "Assign Unit"
+     - Udah di-assign tapi belum diisi teknisi -> tampilin unit yang di-assign
+     - Udah diisi teknisi & match_status MATCH -> badge hijau "Cocok"
+     - MISMATCH & belum di-resolve -> alert merah + tombol resolve
+     - MISMATCH & udah di-resolve (ada mismatch_note) -> alert kuning "diterima" */
+  function renderPerangkatSection(i) {
+    if (!session || session.role !== 'ADMIN') {
+      // Non-admin (misal Finance/Atasan) cukup lihat status match kalau ada,
+      // gak perlu bisa assign/resolve.
+      if (i.match_status === 'MATCH') return `<div class="text-success small mt-1"><i class="bi bi-check-circle-fill"></i> Cocok dengan unit yang di-assign</div>`;
+      if (i.match_status === 'MISMATCH') return `<div class="text-danger small mt-1"><i class="bi bi-exclamation-triangle-fill"></i> SN tidak cocok dengan unit yang di-assign</div>`;
+      return '';
+    }
+
+    if (i.match_status === 'MATCH') {
+      return `<div class="alert alert-success py-2 px-3 mt-2 mb-0" style="font-size:12px;"><i class="bi bi-check-circle-fill"></i> Cocok dengan unit yang di-assign (${escapeHtml(i.expected_perangkat_name || '-')} · ${escapeHtml(i.expected_serial_number || '-')})</div>`;
+    }
+    if (i.match_status === 'MISMATCH') {
+      if (i.mismatch_note) {
+        return `<div class="alert alert-warning py-2 px-3 mt-2 mb-0" style="font-size:12px;"><i class="bi bi-check2-circle"></i> <b>Mismatch diterima:</b> ${escapeHtml(i.mismatch_note)}</div>`;
+      }
+      return `
+        <div class="alert alert-danger py-2 px-3 mt-2 mb-2" style="font-size:12px;">
+          <i class="bi bi-exclamation-triangle-fill"></i> <b>SN Tidak Cocok!</b> Seharusnya: <code>${escapeHtml(i.expected_serial_number || '-')}</code> (${escapeHtml(i.expected_perangkat_name || '-')})
+        </div>
+        <button class="btn btn-sm btn-outline-warning" onclick="resolveMismatch(${i.id}, '${escapeHtml(i.template_name).replace(/'/g, "\\'")}')">
+          <i class="bi bi-check2-circle"></i> Resolve (tetap terima)
+        </button>
+      `;
+    }
+    // N/A -- belum ada hasil pencocokan (item belum diisi teknisi, atau
+    // memang belum di-assign unit sama sekali)
+    if (i.expected_perangkat_id) {
+      return `<div class="text-muted small mt-1"><i class="bi bi-hdd-network"></i> Unit di-assign: <b>${escapeHtml(i.expected_perangkat_name || '-')}</b> (${escapeHtml(i.expected_serial_number || '-')}) -- menunggu teknisi konfirmasi di lapangan</div>`;
+    }
+    return `
+      <button class="btn btn-sm btn-outline-secondary mt-1" onclick="openAssignPerangkat(${i.id}, '${escapeHtml(i.category).replace(/'/g, "\\'")}')">
+        <i class="bi bi-hdd-network"></i> Assign Unit dari Master Perangkat
+      </button>
+    `;
+  }
+
+  async function openAssignPerangkat(checklistId, kategori) {
+    try {
+      // Gabungin 2 sumber: (1) unit yang UDAH TERPASANG di site order ini
+      // -- relevan buat tiket maintenance/gangguan, unitnya emang udah
+      // ada di situ, gak perlu diambil dari gudang -- dan (2) stok
+      // TERSEDIA di gudang -- relevan buat instalasi baru/penggantian.
+      const [ownSite, stok] = await Promise.all([
+        api(`/api/perangkat?site_id=${currentOrder.site_id}`),
+        api(`/api/perangkat?status=TERSEDIA${kategori ? '&kategori=' + encodeURIComponent(kategori) : ''}`),
+      ]);
+      const seen = new Set();
+      const options = [];
+      [...ownSite.perangkat, ...stok.perangkat].forEach(p => {
+        if (!seen.has(p.id)) { seen.add(p.id); options.push(p); }
+      });
+      if (!options.length) { toast('Belum ada perangkat terdaftar di Master Perangkat', 'error'); return; }
+
+      const list = options.map((p, idx) => {
+        const lokasi = p.site_id == currentOrder.site_id ? ' [sudah di site ini]' : p.status === 'TERSEDIA' ? ' [stok gudang]' : ` [${p.status}]`;
+        return `${idx + 1}. ${p.nama_perangkat} — SN: ${p.serial_number}${lokasi}`;
+      }).join('\n');
+      const pick = prompt(`Pilih nomor unit yang mau di-assign:\n\n${list}`);
+      if (pick === null) return;
+      const idx = Number(pick) - 1;
+      if (isNaN(idx) || !options[idx]) { toast('Pilihan tidak valid', 'error'); return; }
+
+      await api(`/api/orders/${orderId}/ba-checklist/${checklistId}/assign-perangkat`, { method: 'POST', body: JSON.stringify({ perangkat_id: options[idx].id }) });
+      toast('Unit berhasil di-assign', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function resolveMismatch(checklistId, templateName) {
+    const note = prompt(`Keterangan resolve mismatch "${templateName}" (misal: unit sudah diganti, master data akan diupdate):`);
+    if (note === null) return;
+    if (!note.trim()) { toast('Keterangan wajib diisi', 'error'); return; }
+    try {
+      await api(`/api/orders/${orderId}/ba-checklist/${checklistId}/resolve-mismatch`, { method: 'POST', body: JSON.stringify({ note: note.trim() }) });
+      toast('Mismatch berhasil di-resolve', 'success');
+      loadOrder();
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   async function revisiBaItem(checklistId, templateName) {
@@ -367,7 +456,8 @@
 
     const pendingBiaya = (o.rincian_biaya || []).filter(b => b.status === 'PENDING').length;
     const pendingBa = (o.ba_checklist || []).filter(i => i.status === 'PENDING').length;
-    const closeEligible = o.status === 'DONE' && pendingBiaya === 0 && pendingBa === 0;
+    const unresolvedMismatch = (o.ba_checklist || []).filter(i => i.match_status === 'MISMATCH' && !i.mismatch_note).length;
+    const closeEligible = o.status === 'DONE' && pendingBiaya === 0 && pendingBa === 0 && unresolvedMismatch === 0;
 
     return `
       ${canApprove ? `
@@ -454,6 +544,7 @@
               : `<div class="block-message"><i class="bi bi-lock-fill"></i> <div><b>Tutup Tiket masih terkunci</b><br>${[
                   pendingBiaya > 0 ? `Masih ada ${pendingBiaya} biaya yang belum ditransfer Finance.` : null,
                   pendingBa > 0 ? `Masih ada ${pendingBa} item checklist BA yang belum lengkap/perlu revisi teknisi.` : null,
+                  unresolvedMismatch > 0 ? `Masih ada ${unresolvedMismatch} SN yang tidak cocok dan belum di-resolve.` : null,
                 ].filter(Boolean).join('<br>')}</div></div>`
           ) : ''}
           ${!['DONE','CLOSED','CANCELLED','REJECTED'].includes(o.status) ? `<button class="btn btn-outline-danger btn-sm" onclick="updateStatus('CANCELLED')"><i class="bi bi-slash-circle"></i> Batalkan Order</button>` : ''}
