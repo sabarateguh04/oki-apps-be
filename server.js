@@ -14,7 +14,7 @@ const orderRoute      = require('./routes/order.route');
 const dashboardRoute  = require('./routes/dashboard.route');
 const siteRoute       = require('./routes/site.route');
 // const customerBaRoute = require('./routes/customer-ba.route');
-const siteBaRoute = require('./routes/site-ba.route');
+const siteBaRoute = require('./routes/site-ba');
 const perangkatRoute = require('./routes/perangkat.route');
 
 const app = express();
