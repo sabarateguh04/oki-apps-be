@@ -67,6 +67,14 @@
     }
   }
 
+  // BARU: dipanggil layout.js tiap ada event socket 'notification'/
+  // 'order-updated' -- auto-refresh TANPA perlu klik notif/reload manual,
+  // tapi cuma kalau event-nya soal order YANG LAGI DIBUKA (biar gak
+  // reload berlebihan buat order lain yang gak relevan).
+  window.onOrderRealtimeUpdate = function (updatedOrderId) {
+    if (String(updatedOrderId) === String(orderId)) loadOrder();
+  };
+
   function fileChips(files) {
     if (!files || !files.length) return '<span class="text-muted small">Belum ada bukti diupload</span>';
     return files.map(f => `<a href="${f.file_url}" target="_blank" class="file-chip"><i class="bi bi-paperclip"></i> ${f.judul ? escapeHtml(f.judul) : 'Lihat file'}</a>`).join('');
@@ -291,12 +299,18 @@
   }
 
   async function resolveMismatch(checklistId, templateName) {
-    const note = prompt(`Keterangan resolve mismatch "${templateName}" (misal: unit sudah diganti, master data akan diupdate):`);
+    const isSwap = confirm(`Apakah SN yang beda ini karena unit BENERAN DIGANTI (bukan salah ketik)?\n\nOK = Ya, konfirmasi penggantian unit (otomatis update Master Perangkat + Unit Default)\nCancel = Bukan, cuma terima aja tanpa ubah Master Perangkat`);
+    const note = prompt(isSwap
+      ? `Keterangan penggantian unit "${templateName}" (misal: rusak, diganti unit baru):`
+      : `Keterangan resolve mismatch "${templateName}":`);
     if (note === null) return;
     if (!note.trim()) { toast('Keterangan wajib diisi', 'error'); return; }
     try {
-      await api(`/api/orders/${orderId}/ba-checklist/${checklistId}/resolve-mismatch`, { method: 'POST', body: JSON.stringify({ note: note.trim() }) });
-      toast('Mismatch berhasil di-resolve', 'success');
+      const d = await api(`/api/orders/${orderId}/ba-checklist/${checklistId}/resolve-mismatch`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note.trim(), confirm_swap: isSwap }),
+      });
+      toast(d.message, 'success');
       loadOrder();
     } catch (e) { toast(e.message, 'error'); }
   }

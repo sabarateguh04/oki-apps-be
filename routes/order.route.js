@@ -28,6 +28,24 @@ const NOTIF_ROLE_MAP = {
   NOTE:        [], // default skip -- override manual per pemanggilan kalau perlu
 };
 
+/* BARU: dipakai gantiin emitToDashboard('order-updated', ...) polos --
+   sekarang SEKALIAN nge-ping teknisi yang lagi ASSIGNED di order ini
+   lewat room pribadi mereka. Ini yang bikin halaman detail tugas
+   teknisi (web/app) auto-refresh sendiri kalau lagi kebuka, tanpa perlu
+   keluar-masuk halaman atau nunggu notif di-klik dulu. */
+async function notifyOrderChanged(orderId) {
+  emitToDashboard('order-updated', { orderId: Number(orderId) });
+  try {
+    const [techs] = await pool.query(
+      `SELECT technician_id FROM oki_order_technicians WHERE order_id = ? AND status = 'ASSIGNED'`,
+      [orderId],
+    );
+    techs.forEach(t => emitToTechnician(t.technician_id, 'order-updated', { orderId: Number(orderId) }));
+  } catch (e) {
+    console.error('[NOTIFY order-changed]', e.message);
+  }
+}
+
 /* Helper: tulis satu baris ke order_timeline (log aktivitas) SEKALIGUS
    broadcast notifikasi real-time ke role yang RELEVAN (bukan broadcast
    ke semua staff). Ini SATU-SATUNYA titik notifikasi disebar, karena
@@ -571,7 +589,7 @@ router.post('/:id/plan-technician', requireRole('ADMIN'), async (req, res) => {
       [req.params.id, technician_id, req.user.id],
     );
     await logTimeline(req.params.id, 'NOTE', `Tugas ditawarkan ke ${tech[0].nama}`, 'USER', req.user.id);
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    await notifyOrderChanged(req.params.id);
     emitToTechnician(technician_id, 'new-offer', { orderId: Number(req.params.id) });
     sendPushToTechnician(technician_id, 'Tawaran Tugas Baru', `Order ${req.params.id} menunggu respon kamu`, { orderId: req.params.id, type: 'new-offer' });
     return res.json({ success: true, message: `Tugas ditawarkan ke ${tech[0].nama}, menunggu respon` });
@@ -592,7 +610,7 @@ router.delete('/:id/plan-technician/:technicianId', requireRole('ADMIN'), async 
     if (result.affectedRows === 0) {
       return res.status(409).json({ success: false, message: 'Teknisi ini sudah ACCEPTED/ASSIGNED, tidak bisa dibatalkan dari sini' });
     }
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    await notifyOrderChanged(req.params.id);
     return res.json({ success: true, message: 'Tawaran dibatalkan' });
   } catch (e) {
     console.error('[ORDER unplan-technician]', e.message);
@@ -623,7 +641,7 @@ router.post('/:id/respond', requireTechnician, async (req, res) => {
     const [[tech]] = await pool.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
     const msg = response === 'ACCEPTED' ? `${tech.nama} menerima tawaran tugas` : `${tech.nama} menolak tawaran tugas`;
     await logTimeline(req.params.id, 'NOTE', msg, 'TECHNICIAN', req.user.id, ['ADMIN']);
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    await notifyOrderChanged(req.params.id);
 
     return res.json({ success: true, message: response === 'ACCEPTED' ? 'Tugas diterima' : 'Tugas ditolak' });
   } catch (e) {
@@ -663,7 +681,7 @@ router.post('/:id/pekerjaan', requireTechnician, handleUploadMultiple('files', 1
       const saved = await saveFiles(conn, req.params.id, 'PEKERJAAN', req.files, req.user.id, null, judulList, 'TECHNICIAN');
       const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
       await logTimeline(req.params.id, 'NOTE', `${tech.nama} upload ${req.files.length} bukti pekerjaan`, 'TECHNICIAN', req.user.id);
-      emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+      await notifyOrderChanged(req.params.id);
       return res.json({ success: true, message: 'Bukti pekerjaan berhasil diupload', files: saved.map(s => s.url) });
     } finally {
       conn.release();
@@ -775,7 +793,7 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
         ? `${tech.nama} sudah revisi ulang checklist BA: ${item.template_name}`
         : `${tech.nama} mengisi checklist BA: ${item.template_name}`;
       await logTimeline(req.params.id, 'NOTE', msg, 'TECHNICIAN', req.user.id, wasRevision ? ['ADMIN'] : []);
-      emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+      await notifyOrderChanged(req.params.id);
       return res.json({ success: true, message: 'Item checklist berhasil diisi' });
     } finally {
       conn.release();
@@ -835,15 +853,26 @@ router.post('/:id/ba-checklist/:checklistId/assign-perangkat', requireRole('ADMI
 /* ═══════════════════════════════════════════════════
    BARU: POST /api/orders/:id/ba-checklist/:checklistId/resolve-mismatch
    — HANYA ADMIN
-   SN yang diinput teknisi gak cocok sama unit yang di-pre-assign, tapi
-   admin mau tetep lanjut Close tiket (misal unit emang udah diganti di
-   lapangan). Wajib kasih keterangan -- begitu di-resolve, item ini
-   gak lagi ngeblokir Close (walau match_status tetep MISMATCH buat
-   histori, mismatch_note yang nandain "udah direview & diterima").
-   body: { note } (wajib)
+   SN yang diinput teknisi gak cocok sama unit yang di-pre-assign.
+   2 mode:
+     1. confirm_swap = false/gak dikirim -> cuma tandai "diterima", gak
+        ngubah apa-apa di Master Perangkat (dipakai kalau ternyata cuma
+        salah ketik dari teknisi, bukan beneran ganti unit).
+     2. confirm_swap = true -> DIANGGAP UNIT BENERAN DIGANTI. Otomatis:
+        - Cari perangkat di Master Perangkat yang serial_number-nya
+          cocok sama text_value yang diinput teknisi (unit "baru").
+          Kalau ketemu, statusnya diupdate jadi TERPAKAI + site_id order
+          ini. Kalau gak ketemu di master sama sekali, dilewat (perlu
+          didaftarkan manual dulu di Master Perangkat oleh admin).
+        - Unit LAMA (yang sebelumnya di expected_perangkat_id) diupdate
+          statusnya jadi old_unit_status (default 'RUSAK').
+        - Unit Default di TEMPLATE BA (oki_site_ba_template) di-update
+          ke unit baru -- biar order-order berikutnya ke site ini
+          OTOMATIS ngarepin unit baru ini, gak perlu di-assign manual lagi.
+   body: { note (wajib), confirm_swap?, old_unit_status? }
 ═══════════════════════════════════════════════════ */
 router.post('/:id/ba-checklist/:checklistId/resolve-mismatch', requireRole('ADMIN'), async (req, res) => {
-  const { note } = req.body;
+  const { note, confirm_swap, old_unit_status } = req.body;
   if (!note || !note.trim()) {
     return res.status(400).json({ success: false, message: 'Keterangan wajib diisi (misal alasan kenapa unit beda tetap diterima)' });
   }
@@ -858,13 +887,37 @@ router.post('/:id/ba-checklist/:checklistId/resolve-mismatch', requireRole('ADMI
     }
 
     await pool.query(`UPDATE oki_order_ba_checklist SET mismatch_note = ? WHERE id = ?`, [note.trim(), item.id]);
+
+    let swapMessage = '';
+    if (confirm_swap) {
+      const [[ord]] = await pool.query(`SELECT site_id FROM oki_orders WHERE id = ?`, [req.params.id]);
+      const [[newUnit]] = await pool.query(`SELECT id, nama_perangkat FROM oki_perangkat WHERE serial_number = ?`, [item.text_value]);
+
+      if (newUnit) {
+        await pool.query(`UPDATE oki_perangkat SET status='TERPAKAI', site_id=? WHERE id = ?`, [ord.site_id, newUnit.id]);
+        // Update Unit Default di template BA -- order berikutnya ke site
+        // ini otomatis ngarepin unit baru ini, gak perlu assign manual lagi.
+        if (item.template_id) {
+          await pool.query(`UPDATE oki_site_ba_template SET default_perangkat_id = ? WHERE id = ?`, [newUnit.id, item.template_id]);
+        }
+        swapMessage = ` Unit baru (${newUnit.nama_perangkat}) diupdate jadi TERPAKAI & jadi unit default site ini.`;
+      } else {
+        swapMessage = ' Unit baru belum terdaftar di Master Perangkat -- daftarkan dulu manual biar ke-track.';
+      }
+
+      if (item.expected_perangkat_id) {
+        await pool.query(`UPDATE oki_perangkat SET status=? WHERE id = ?`, [old_unit_status || 'RUSAK', item.expected_perangkat_id]);
+        swapMessage += ` Unit lama ditandai ${old_unit_status || 'RUSAK'}.`;
+      }
+    }
+
     await logTimeline(
       req.params.id, 'NOTE',
-      `Admin resolve mismatch SN "${item.template_name}": ${note.trim()}`,
+      `Admin resolve mismatch SN "${item.template_name}": ${note.trim()}${confirm_swap ? ' (konfirmasi penggantian unit)' : ''}`,
       'USER', req.user.id, [],
     );
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
-    return res.json({ success: true, message: 'Mismatch berhasil di-resolve, order bisa dilanjutkan ke Close' });
+    await notifyOrderChanged(req.params.id);
+    return res.json({ success: true, message: `Mismatch berhasil di-resolve, order bisa dilanjutkan ke Close.${swapMessage}` });
   } catch (e) {
     console.error('[ORDER resolve-mismatch]', e.message);
     return res.status(500).json({ success: false, message: 'Server error' });
@@ -922,7 +975,7 @@ router.post('/:id/ba-checklist/:checklistId/revisi', requireRole('ADMIN'), async
       );
     }
 
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    await notifyOrderChanged(req.params.id);
     return res.json({ success: true, message: 'Item checklist ditandai perlu revisi, teknisi sudah diberi tahu' });
   } catch (e) {
     console.error('[ORDER ba-checklist revisi]', e.message);
@@ -953,7 +1006,7 @@ router.post('/:id/kebutuhan/:kebutuhanId/dibeli', requireRole('FINANCE'), handle
       await conn.query(`UPDATE oki_order_kebutuhan SET bukti_url = ? WHERE id = ?`, [urls[0], req.params.kebutuhanId]);
     }
     await logTimeline(req.params.id, 'NOTE', 'Finance menandai 1 kebutuhan pra-assign sudah dibeli', 'USER', req.user.id, ['ADMIN']);
-    emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+    await notifyOrderChanged(req.params.id);
     return res.json({ success: true, message: 'Kebutuhan ditandai selesai dibeli', files: urls });
   } catch (e) {
     console.error('[ORDER kebutuhan-dibeli]', e.message);
@@ -1003,7 +1056,7 @@ router.post('/:id/biaya/:biayaId/bayar', requireRole('FINANCE'), handleUploadMul
       }
       await conn.query(`UPDATE oki_order_biaya SET status='DONE', paid_by=?, paid_at=NOW() WHERE id = ?`, [req.user.id, req.params.biayaId]);
       await logTimeline(req.params.id, 'NOTE', `Finance transfer biaya ${biaya.jenis} (${biaya.deskripsi || '-'}) selesai`, 'USER', req.user.id, ['ADMIN']);
-      emitToDashboard('order-updated', { orderId: Number(req.params.id) });
+      await notifyOrderChanged(req.params.id);
       return res.json({ success: true, message: 'Biaya ditandai selesai ditransfer', files: urls });
     } finally {
       conn.release();

@@ -200,6 +200,17 @@ function _startNotifSocket() {
     _notifSocket.emit('register-dashboard', { role: session ? session.role : null });
   });
   _notifSocket.on('notification', handleIncomingNotification);
+
+  // BARU: selain notifikasi buat bell, ini juga dipakai buat AUTO-REFRESH
+  // data di halaman yang lagi kebuka (order-detail, orders list, dsb) --
+  // tanpa perlu klik notif atau reload manual dulu. Tiap halaman yang mau
+  // ikut auto-refresh tinggal definisiin `window.onOrderRealtimeUpdate =
+  // function(orderId) { ... }` di script-nya sendiri.
+  _notifSocket.on('order-updated', (payload) => {
+    if (typeof window.onOrderRealtimeUpdate === 'function') {
+      window.onOrderRealtimeUpdate(payload?.orderId);
+    }
+  });
 }
 
 function handleIncomingNotification(n) {
@@ -229,6 +240,10 @@ function handleIncomingNotification(n) {
   updateNotifBadge();
   renderNotifList();
   playNotifSound();
+
+  if (typeof window.onOrderRealtimeUpdate === 'function') {
+    window.onOrderRealtimeUpdate(n.orderId);
+  }
 }
 
 function injectNotifStyles() {

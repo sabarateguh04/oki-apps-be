@@ -44,7 +44,28 @@
       document.getElementById('page-body').innerHTML = '<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><p>ID tugas tidak ditemukan di URL</p></div>';
     } else {
       loadTask();
+      connectRealtimeUpdates();
     }
+  }
+
+  /* BARU: koneksi socket khusus teknisi -- biar halaman ini auto-refresh
+     sendiri kalau ada perubahan (admin resolve mismatch, minta revisi BA,
+     dll) TANPA perlu teknisi keluar-masuk halaman atau reload manual. */
+  function connectRealtimeUpdates() {
+    function start() {
+      const socket = window.io();
+      socket.on('connect', () => socket.emit('register-technician', session.id));
+      const maybeReload = (payload) => {
+        if (payload && String(payload.orderId) === String(orderId)) loadTask();
+      };
+      socket.on('order-updated', maybeReload);
+      socket.on('ba-revision-requested', maybeReload);
+    }
+    if (window.io) { start(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+    s.onload = start;
+    document.head.appendChild(s);
   }
 
   function fmtDateOnly(d) {
