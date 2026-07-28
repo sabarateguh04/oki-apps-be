@@ -7,82 +7,172 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <style>
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
   body{
     min-height:100vh;
-    display:flex; align-items:center; justify-content:center;
-    background:linear-gradient(135deg,#7a1420 0%,#3d0a11 60%,#240509 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:
+      radial-gradient(680px 460px at 88% -10%, rgba(201,162,39,.28), transparent 58%),
+      radial-gradient(620px 420px at 6% 108%, rgba(201,162,39,.18), transparent 55%),
+      linear-gradient(135deg,#7a1420 0%,#3d0a11 60%,#240509 100%);
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    position:relative;
+    overflow:hidden;
+    padding:24px;
   }
+
+  /* Blob dekoratif blur */
+  .blob{ position:fixed; border-radius:50%; filter:blur(70px); z-index:0; pointer-events:none; }
+  .blob-1{ width:320px; height:320px; top:-110px; left:-90px; background:rgba(201,162,39,.22); }
+  .blob-2{ width:280px; height:280px; bottom:-100px; right:-80px; background:rgba(255,255,255,.06); }
+
+  /* Ring dekoratif tipis di belakang kartu */
+  .deco-ring{
+    position:absolute; z-index:0; border-radius:50%;
+    border:1px solid rgba(255,255,255,.12);
+    pointer-events:none;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+  }
+  .deco-ring-1{ width:520px; height:520px; }
+  .deco-ring-2{ width:640px; height:640px; }
+
+  .login-wrap{ position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; }
+
   .login-card{
-    width:400px; max-width:92vw;
+    width:410px; max-width:92vw;
     background:#fff;
-    border-radius:20px;
-    padding:36px 32px;
-    box-shadow:0 20px 60px rgba(0,0,0,.25);
+    border-radius:22px;
+    padding:38px 34px;
+    box-shadow:0 24px 60px rgba(0,0,0,.35);
+    position:relative;
+    overflow:hidden;
   }
-  .brand{ text-align:center; margin-bottom:22px; }
+  .login-card::before{
+    content:'';
+    position:absolute; top:0; left:0; right:0; height:5px;
+    background:linear-gradient(90deg,#7a1420,#c9a227,#7a1420);
+  }
+
+  .brand{ text-align:center; margin-bottom:24px; }
   .brand .icon{
     width:60px; height:60px; border-radius:16px;
-    background:#7a1420; color:#fff;
+    background:linear-gradient(135deg,#7a1420,#3d0a11); color:#c9a227;
     display:flex; align-items:center; justify-content:center;
-    font-size:28px; margin:0 auto 12px;
+    font-size:28px; margin:0 auto 14px;
+    box-shadow:0 8px 20px rgba(122,20,32,.28);
   }
-  .brand h1{ font-size:18px; font-weight:800; margin:0; }
-  .brand p{ font-size:12.5px; color:#6c757d; margin-top:2px; }
+  .brand h1{ font-size:19px; font-weight:800; margin:0; color:#12172b; letter-spacing:.3px; }
+  .brand p{ font-size:12.5px; color:#6c757d; margin-top:3px; }
 
-  .role-tabs{ display:flex; background:#f4f6f9; border-radius:12px; padding:5px; margin-bottom:20px; }
+  .role-tabs{ display:flex; background:#f4f2ec; border-radius:12px; padding:5px; margin-bottom:20px; }
   .role-tabs button{
     flex:1; border:none; background:transparent; padding:9px; border-radius:9px;
-    font-weight:700; font-size:13px; color:#6c757d;
+    font-weight:700; font-size:13px; color:#6c757d; transition:.15s;
   }
   .role-tabs button.active{ background:#7a1420; color:#fff; }
 
   .form-label{ font-size:12.5px; font-weight:600; color:#495057; }
-  .form-control{ border-radius:10px; padding:10px 14px; font-size:13.5px; }
-  .btn-login{ border-radius:10px; padding:11px; font-weight:700; font-size:14px; }
-  .error-box{ font-size:12.5px; color:#dc3545; background:#f8d7da; border-radius:8px; padding:9px 12px; display:none; margin-bottom:14px; }
-  .hint{ font-size:11.5px; color:#98a2b3; text-align:center; margin-top:16px; }
+  .form-control{ border-radius:10px; padding:10px 14px; font-size:13.5px; border:1px solid #e5e1d8; }
+  .form-control:focus{ border-color:#c9a227; box-shadow:0 0 0 .2rem rgba(201,162,39,.18); }
+
+  .input-group .form-control{ border-right:none; }
+  .pw-toggle{
+    border:1px solid #e5e1d8; border-left:none; background:#fff; color:#98a2b3;
+    border-radius:0 10px 10px 0; padding:0 13px; cursor:pointer;
+  }
+  .pw-toggle:hover{ color:#7a1420; }
+
+  .btn-login{
+    border-radius:10px; padding:11px; font-weight:700; font-size:14px;
+    background:linear-gradient(135deg,#7a1420,#3d0a11); border:none; color:#fff;
+    box-shadow:0 10px 22px rgba(122,20,32,.28);
+    transition:transform .15s ease;
+  }
+  .btn-login:hover{ transform:translateY(-1px); color:#fff; }
+  .btn-login:disabled{ opacity:.75; transform:none; }
+
+  .error-box{ font-size:12.5px; color:#842029; background:#f8d7da; border-radius:8px; padding:9px 12px; display:none; margin-bottom:14px; }
+  .hint{ font-size:11.5px; color:#98a2b3; text-align:center; margin-top:18px; }
+
+  .login-footer{
+    position:relative; z-index:2;
+    margin-top:26px;
+    text-align:center;
+    font-size:11.5px;
+    color:rgba(255,255,255,.65);
+  }
+  .login-footer b{ color:rgba(255,255,255,.9); }
+
+  @media(max-width:420px){
+    .login-card{ padding:30px 22px; }
+  }
 </style>
 </head>
 <body>
 
-<div class="login-card">
-  <div class="brand">
-    <div class="icon"><i class="bi bi-align-top"></i></div>
-    <h1>TOPS APPS</h1>
-    <p>Task Operations Process System</p>
-    <!-- <p>Oky Order & Teknisi Management</p> -->
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="deco-ring deco-ring-1"></div>
+<div class="deco-ring deco-ring-2"></div>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand">
+      <div class="icon"><i class="bi bi-align-top"></i></div>
+      <h1>TOPS APPS</h1>
+      <p>Task Operations Process System</p>
+    </div>
+
+    <!-- <div class="role-tabs">
+      <button type="button" id="tab-staff" class="active" onclick="switchTab('staff')">Staff</button>
+      <button type="button" id="tab-technician" onclick="switchTab('technician')">Teknisi</button>
+    </div> -->
+
+    <div id="error-box" class="error-box"></div>
+
+    <form id="login-form" onsubmit="return doLogin(event)">
+      <div class="mb-3">
+        <label class="form-label">Username</label>
+        <input type="text" class="form-control" id="username" placeholder="Masukkan username" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <div class="input-group">
+          <input type="password" class="form-control" id="password" placeholder="Masukkan password" required>
+          <button type="button" class="pw-toggle" onclick="togglePassword()"><i class="bi bi-eye" id="pw-icon"></i></button>
+        </div>
+      </div>
+      <div class="d-grid">
+        <button type="submit" class="btn btn-login" id="btn-submit">
+          <i class="bi bi-box-arrow-in-right"></i> Masuk
+        </button>
+      </div>
+    </form>
+
+    <p class="hint" id="demo-hint">Demo staff: <code>admin</code> / <code>password123</code></p>
   </div>
 
-  <!-- <div class="role-tabs">
-    <button type="button" id="tab-staff" class="active" onclick="switchTab('staff')">Staff</button>
-    <button type="button" id="tab-technician" onclick="switchTab('technician')">Teknisi</button>
-  </div> -->
-
-  <div id="error-box" class="error-box"></div>
-
-  <form id="login-form" onsubmit="return doLogin(event)">
-    <div class="mb-3">
-      <label class="form-label">Username</label>
-      <input type="text" class="form-control" id="username" placeholder="Masukkan username" required>
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Password</label>
-      <input type="password" class="form-control" id="password" placeholder="Masukkan password" required>
-    </div>
-    <div class="d-grid">
-      <button type="submit" class="btn btn-primary btn-login" id="btn-submit">
-        <i class="bi bi-box-arrow-in-right"></i> Masuk
-      </button>
-    </div>
-  </form>
-
-  <p class="hint" id="demo-hint">Demo staff: <code>admin</code> / <code>password123</code></p>
+  <div class="login-footer">
+    &copy; <span id="footer-year"></span> Task Operations Process System — All rights reserved.<br>
+    Copyright by <b>Djalu</b>
+  </div>
 </div>
 
 <script src="js/api.js"></script>
 <script>
+  document.getElementById('footer-year').textContent = new Date().getFullYear();
+
   let currentTab = 'staff';
+
+  function togglePassword() {
+    const input = document.getElementById('password');
+    const icon = document.getElementById('pw-icon');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    icon.className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+  }
 
   function switchTab(tab) {
     currentTab = tab;
