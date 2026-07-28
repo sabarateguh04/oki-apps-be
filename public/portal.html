@@ -8,51 +8,118 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <style>
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
   body{
     min-height:100vh;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:
+      radial-gradient(720px 480px at 92% -8%, rgba(201,162,39,.18), transparent 60%),
+      radial-gradient(680px 460px at -6% 12%, rgba(122,20,32,.14), transparent 55%),
+      radial-gradient(600px 420px at 50% 115%, rgba(201,162,39,.12), transparent 60%),
+      #f6f5f1;
+    background-attachment:fixed;
+    position:relative;
+    overflow-x:hidden;
   }
+
+  /* Blob dekoratif blur di background */
+  .blob{
+    position:fixed;
+    border-radius:50%;
+    filter:blur(60px);
+    z-index:0;
+    pointer-events:none;
+  }
+  .blob-1{ width:340px; height:340px; top:-100px; right:-80px; background:rgba(201,162,39,.25); }
+  .blob-2{ width:300px; height:300px; bottom:-120px; left:-100px; background:rgba(122,20,32,.16); }
+  .blob-3{ width:220px; height:220px; bottom:8%; right:6%; background:rgba(201,162,39,.14); }
+
   .portal-top{
+    position:relative; z-index:2;
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:22px 36px;
+    padding:20px 36px;
   }
   .portal-brand{ display:flex; align-items:center; gap:12px; }
   .portal-brand .icon{
     width:44px; height:44px; border-radius:12px;
-    background:var(--brand); color:#fff;
+    background:linear-gradient(135deg,var(--brand),var(--brand-dark));
+    color:#fff;
     display:flex; align-items:center; justify-content:center;
     font-size:20px;
+    box-shadow:0 6px 16px rgba(122,20,32,.25);
   }
-  .portal-brand h1{ font-size:16px; font-weight:800; margin:0; color:#12172b; }
+  .portal-brand h1{ font-size:16px; font-weight:800; margin:0; color:#12172b; letter-spacing:.3px; }
   .portal-brand p{ font-size:11px; color:#6c757d; margin:0; }
 
-  .portal-user{
-    display:flex; align-items:center; gap:12px;
-  }
+  .portal-user{ display:flex; align-items:center; gap:14px; }
+  .portal-user .user-chip{ background:#fff; box-shadow:0 2px 10px rgba(0,0,0,.05); }
   .portal-user .logout-link{
     font-size:12.5px; color:#6c757d; text-decoration:none;
     display:flex; align-items:center; gap:5px;
+    padding:8px 10px; border-radius:10px; transition:.15s;
   }
-  .portal-user .logout-link:hover{ color:var(--brand); }
+  .portal-user .logout-link:hover{ color:var(--brand); background:#fff; }
 
   .portal-body{
-    max-width:1000px;
+    position:relative; z-index:2;
+    max-width:1020px;
     margin:0 auto;
-    padding:10px 24px 60px;
+    padding:14px 24px 60px;
   }
 
   .welcome-banner{
-    background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dark) 100%);
+    background:linear-gradient(120deg,var(--brand) 0%,var(--brand-dark) 65%, #2a0710 100%);
     color:#fff;
-    border-radius:18px;
-    padding:26px 30px;
-    margin-bottom:28px;
-    box-shadow:0 10px 30px rgba(122,20,32,.18);
+    border-radius:20px;
+    padding:30px 32px;
+    margin-bottom:30px;
+    box-shadow:0 16px 40px rgba(122,20,32,.22);
+    position:relative;
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    gap:20px;
   }
-  .welcome-banner h2{ font-size:20px; font-weight:800; margin:0 0 8px; }
-  .welcome-banner p{ font-size:13.5px; opacity:.92; margin:0; max-width:620px; line-height:1.5; }
+  .welcome-banner::after{
+    content:'';
+    position:absolute;
+    right:-40px; top:-40px;
+    width:200px; height:200px;
+    border-radius:50%;
+    background:rgba(201,162,39,.18);
+  }
+  .welcome-banner::before{
+    content:'';
+    position:absolute;
+    right:60px; bottom:-70px;
+    width:140px; height:140px;
+    border-radius:50%;
+    background:rgba(255,255,255,.06);
+  }
+  .welcome-icon{
+    width:56px; height:56px; flex-shrink:0;
+    border-radius:16px;
+    background:rgba(255,255,255,.14);
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px;
+    color:#f7d774;
+    position:relative; z-index:1;
+  }
+  .welcome-text{ position:relative; z-index:1; }
+  .welcome-text .eyebrow{
+    font-size:11px; font-weight:700; letter-spacing:1.2px;
+    text-transform:uppercase; opacity:.75; margin-bottom:4px;
+  }
+  .welcome-banner h2{ font-size:21px; font-weight:800; margin:0 0 8px; }
+  .welcome-banner p{ font-size:13.5px; opacity:.92; margin:0; max-width:600px; line-height:1.55; }
+
+  .section-label{
+    font-size:11.5px; font-weight:800; letter-spacing:1.2px;
+    text-transform:uppercase; color:#98a2b3; margin-bottom:14px;
+  }
 
   .app-grid{
     display:grid;
@@ -61,47 +128,83 @@
   }
   .app-tile{
     background:#fff;
-    border-radius:16px;
-    padding:22px 18px;
+    border-radius:18px;
+    padding:22px 20px;
     display:flex;
     align-items:center;
     gap:14px;
     text-decoration:none;
     color:#12172b;
-    box-shadow:0 2px 14px rgba(0,0,0,.05);
-    transition:.15s;
-    border:1px solid transparent;
+    box-shadow:0 3px 16px rgba(18,23,43,.06);
+    transition:transform .18s ease, box-shadow .18s ease;
+    border:1px solid #f0ede4;
+    position:relative;
+    opacity:0;
+    transform:translateY(14px);
+    animation:tileIn .45s ease forwards;
+  }
+  .app-tile:nth-child(1){ animation-delay:.02s; }
+  .app-tile:nth-child(2){ animation-delay:.08s; }
+  .app-tile:nth-child(3){ animation-delay:.14s; }
+  .app-tile:nth-child(4){ animation-delay:.20s; }
+  .app-tile:nth-child(5){ animation-delay:.26s; }
+  .app-tile:nth-child(6){ animation-delay:.32s; }
+  .app-tile:nth-child(7){ animation-delay:.38s; }
+  @keyframes tileIn{
+    to{ opacity:1; transform:translateY(0); }
   }
   .app-tile:hover{
-    transform:translateY(-3px);
-    box-shadow:0 10px 24px rgba(122,20,32,.12);
-    border-color:#f1e2c4;
+    transform:translateY(-4px);
+    box-shadow:0 16px 30px rgba(18,23,43,.12);
     color:#12172b;
   }
+  .app-tile:hover .tile-icon{ transform:scale(1.08); }
   .app-tile .tile-icon{
-    width:46px; height:46px;
-    border-radius:12px;
-    background:#fdf3d8;
-    color:var(--brand-gold-dark);
+    width:48px; height:48px;
+    border-radius:13px;
     display:flex; align-items:center; justify-content:center;
     font-size:21px;
     flex-shrink:0;
+    transition:transform .18s ease;
   }
   .app-tile .tile-label{
     font-size:13.5px;
     font-weight:700;
     letter-spacing:.2px;
+    line-height:1.3;
   }
+  .app-tile .tile-arrow{
+    margin-left:auto;
+    color:#d7dae1;
+    font-size:14px;
+    transition:.18s;
+  }
+  .app-tile:hover .tile-arrow{ color:var(--brand); transform:translateX(3px); }
 
-  #loading-tiles{ text-align:center; padding:40px; color:#98a2b3; }
+  /* Palet warna tile, gantian per item */
+  .tile-c0 .tile-icon{ background:#fdf3d8; color:var(--brand-gold-dark); }
+  .tile-c1 .tile-icon{ background:#f6e2e5; color:var(--brand); }
+  .tile-c2 .tile-icon{ background:#e2f4ee; color:#146c43; }
+  .tile-c3 .tile-icon{ background:#eee5fb; color:#6f42c1; }
+  .tile-c4 .tile-icon{ background:#ffe9d9; color:#c2540a; }
+  .tile-c5 .tile-icon{ background:#dff4f9; color:#0aa2c0; }
+  .tile-c6 .tile-icon{ background:#e7ecfb; color:#2f4b99; }
+
+  #loading-tiles{ text-align:center; padding:50px; color:#98a2b3; position:relative; z-index:2; }
 
   @media(max-width:700px){
     .app-grid{ grid-template-columns:repeat(2,1fr); }
-    .portal-top{ padding:18px 20px; }
+    .portal-top{ padding:16px 18px; }
+    .welcome-banner{ flex-direction:column; align-items:flex-start; padding:24px; }
+    .portal-user span{ display:none; }
   }
 </style>
 </head>
 <body>
+
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
 
 <div class="portal-top">
   <div class="portal-brand">
@@ -124,9 +227,15 @@
 
 <div class="portal-body">
   <div class="welcome-banner">
-    <h2 id="welcome-title">Welcome Back</h2>
-    <p>Silakan pilih menu sesuai kebutuhan kamu. Selamat bekerja dan tetap semangat berkontribusi. Jangan lupa berdoa sebelum memulai pekerjaan.</p>
+    <div class="welcome-icon"><i class="bi" id="greet-icon"></i></div>
+    <div class="welcome-text">
+      <div class="eyebrow" id="greet-eyebrow">Selamat Datang</div>
+      <h2 id="welcome-title">Welcome Back</h2>
+      <p>Silakan pilih menu sesuai kebutuhan kamu. Selamat bekerja dan tetap semangat berkontribusi. Jangan lupa berdoa sebelum memulai pekerjaan.</p>
+    </div>
   </div>
+
+  <div class="section-label">Menu Aplikasi</div>
 
   <div id="loading-tiles">
     <span class="spinner-border spinner-border-sm"></span> Memuat menu...
@@ -143,12 +252,23 @@
     document.getElementById('user-name').textContent = session.nama + (session.role ? ' · ' + session.role : '');
     document.getElementById('welcome-title').textContent = 'Welcome Back, ' + session.nama;
 
+    // Sapaan & ikon menyesuaikan jam saat ini
+    const hour = new Date().getHours();
+    let greetText, greetIcon;
+    if (hour < 11) { greetText = 'Selamat Pagi'; greetIcon = 'bi-sunrise'; }
+    else if (hour < 15) { greetText = 'Selamat Siang'; greetIcon = 'bi-sun'; }
+    else if (hour < 18) { greetText = 'Selamat Sore'; greetIcon = 'bi-cloud-sun'; }
+    else { greetText = 'Selamat Malam'; greetIcon = 'bi-moon-stars'; }
+    document.getElementById('greet-eyebrow').textContent = greetText;
+    document.getElementById('greet-icon').className = 'bi ' + greetIcon;
+
     const nav = ALL_STAFF_NAV.filter(item => item.roles.includes(session.role));
     const grid = document.getElementById('app-grid');
-    grid.innerHTML = nav.map(item => `
-      <a class="app-tile" href="${item.href}">
+    grid.innerHTML = nav.map((item, i) => `
+      <a class="app-tile tile-c${i % 7}" href="${item.href}">
         <div class="tile-icon"><i class="bi ${item.icon}"></i></div>
         <div class="tile-label">${item.label.toUpperCase()}</div>
+        <i class="bi bi-chevron-right tile-arrow"></i>
       </a>
     `).join('');
 
