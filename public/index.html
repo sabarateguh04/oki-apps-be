@@ -119,7 +119,7 @@
           body: JSON.stringify({ username, password }),
         });
         setSession({ type: 'staff', id: data.userId, username: data.username, nama: data.nama, role: data.role, token: data.token });
-        window.location.href = 'dashboard';
+        window.location.href = 'portal';
       } else {
         const data = await api('/api/auth/login-technician', {
           method: 'POST',
@@ -139,7 +139,7 @@
   // Kalau sudah login sebelumnya, langsung lempar ke halaman yang sesuai
   (function redirectIfLoggedIn(){
     const s = getSession();
-    if (s) window.location.href = s.type === 'technician' ? 'profile' : 'dashboard';
+    if (s) window.location.href = s.type === 'technician' ? 'profile' : 'portal';
   })();
 </script>
 </body>

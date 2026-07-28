@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Operations Process System</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  body{
+    min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  .portal-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:22px 36px;
+  }
+  .portal-brand{ display:flex; align-items:center; gap:12px; }
+  .portal-brand .icon{
+    width:44px; height:44px; border-radius:12px;
+    background:var(--brand); color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:20px;
+  }
+  .portal-brand h1{ font-size:16px; font-weight:800; margin:0; color:#12172b; }
+  .portal-brand p{ font-size:11px; color:#6c757d; margin:0; }
+
+  .portal-user{
+    display:flex; align-items:center; gap:12px;
+  }
+  .portal-user .logout-link{
+    font-size:12.5px; color:#6c757d; text-decoration:none;
+    display:flex; align-items:center; gap:5px;
+  }
+  .portal-user .logout-link:hover{ color:var(--brand); }
+
+  .portal-body{
+    max-width:1000px;
+    margin:0 auto;
+    padding:10px 24px 60px;
+  }
+
+  .welcome-banner{
+    background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dark) 100%);
+    color:#fff;
+    border-radius:18px;
+    padding:26px 30px;
+    margin-bottom:28px;
+    box-shadow:0 10px 30px rgba(122,20,32,.18);
+  }
+  .welcome-banner h2{ font-size:20px; font-weight:800; margin:0 0 8px; }
+  .welcome-banner p{ font-size:13.5px; opacity:.92; margin:0; max-width:620px; line-height:1.5; }
+
+  .app-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:16px;
+  }
+  .app-tile{
+    background:#fff;
+    border-radius:16px;
+    padding:22px 18px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    text-decoration:none;
+    color:#12172b;
+    box-shadow:0 2px 14px rgba(0,0,0,.05);
+    transition:.15s;
+    border:1px solid transparent;
+  }
+  .app-tile:hover{
+    transform:translateY(-3px);
+    box-shadow:0 10px 24px rgba(122,20,32,.12);
+    border-color:#f1e2c4;
+    color:#12172b;
+  }
+  .app-tile .tile-icon{
+    width:46px; height:46px;
+    border-radius:12px;
+    background:#fdf3d8;
+    color:var(--brand-gold-dark);
+    display:flex; align-items:center; justify-content:center;
+    font-size:21px;
+    flex-shrink:0;
+  }
+  .app-tile .tile-label{
+    font-size:13.5px;
+    font-weight:700;
+    letter-spacing:.2px;
+  }
+
+  #loading-tiles{ text-align:center; padding:40px; color:#98a2b3; }
+
+  @media(max-width:700px){
+    .app-grid{ grid-template-columns:repeat(2,1fr); }
+    .portal-top{ padding:18px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="portal-top">
+  <div class="portal-brand">
+    <div class="icon"><i class="bi bi-align-top"></i></div>
+    <div>
+      <h1>TOPS APPS</h1>
+      <p>Task Operations Process System</p>
+    </div>
+  </div>
+  <div class="portal-user">
+    <div class="user-chip">
+      <div class="av" id="user-av">-</div>
+      <span id="user-name">-</span>
+    </div>
+    <a href="#" class="logout-link" onclick="logout(); return false;">
+      <i class="bi bi-box-arrow-right"></i> Logout
+    </a>
+  </div>
+</div>
+
+<div class="portal-body">
+  <div class="welcome-banner">
+    <h2 id="welcome-title">Welcome Back</h2>
+    <p>Silakan pilih menu sesuai kebutuhan kamu. Selamat bekerja dan tetap semangat berkontribusi. Jangan lupa berdoa sebelum memulai pekerjaan.</p>
+  </div>
+
+  <div id="loading-tiles">
+    <span class="spinner-border spinner-border-sm"></span> Memuat menu...
+  </div>
+  <div class="app-grid" id="app-grid" style="display:none;"></div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/layout.js"></script>
+<script>
+  const session = requireAuth(['staff']);
+  if (session) {
+    document.getElementById('user-av').textContent = (session.nama || '?').slice(0,1).toUpperCase();
+    document.getElementById('user-name').textContent = session.nama + (session.role ? ' · ' + session.role : '');
+    document.getElementById('welcome-title').textContent = 'Welcome Back, ' + session.nama;
+
+    const nav = ALL_STAFF_NAV.filter(item => item.roles.includes(session.role));
+    const grid = document.getElementById('app-grid');
+    grid.innerHTML = nav.map(item => `
+      <a class="app-tile" href="${item.href}">
+        <div class="tile-icon"><i class="bi ${item.icon}"></i></div>
+        <div class="tile-label">${item.label.toUpperCase()}</div>
+      </a>
+    `).join('');
+
+    document.getElementById('loading-tiles').style.display = 'none';
+    grid.style.display = 'grid';
+  }
+</script>
+</body>
+</html>

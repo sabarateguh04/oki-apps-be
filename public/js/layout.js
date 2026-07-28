@@ -33,10 +33,14 @@ function renderLayout({ active, title }) {
     </a>
   `).join('');
 
+  const logoHtml = session.type === 'technician'
+    ? `<div class="logo"><i class="bi bi-tools"></i> Maintenance</div>`
+    : `<a class="logo" href="portal" style="color:#fff;text-decoration:none;"><i class="bi bi-tools"></i> Maintenance</a>`;
+
   const sidebar = document.createElement('div');
   sidebar.className = 'sidebar';
   sidebar.innerHTML = `
-    <div class="logo"><i class="bi bi-tools"></i> Maintenance</div>
+    ${logoHtml}
     <nav>
       ${navHtml}
       <a href="#" onclick="logout(); return false;" style="margin-top:14px;border-top:1px solid rgba(255,255,255,.15);padding-top:16px;">
