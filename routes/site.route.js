@@ -38,6 +38,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+/* POST /api/sites/bulk — Import CSV (HANYA ADMIN) */
+router.post('/bulk', requireRole('ADMIN'), async (req, res) => {
+  const { sites } = req.body;
+  if (!Array.isArray(sites) || sites.length === 0) {
+    return res.status(400).json({ success: false, message: 'Data sites kosong atau tidak valid' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let inserted = 0;
+    for (const b of sites) {
+      if (!b.customer_id || !b.kode_site || !b.site_name) {
+        throw new Error('Kolom customer_id, kode_site, dan site_name wajib diisi pada baris tertentu');
+      }
+      const values = FIELDS.map(f => (b[f] === undefined || b[f] === '' ? null : b[f]));
+      await conn.query(
+        `INSERT INTO oki_customer_sites (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
+        values
+      );
+      inserted++;
+    }
+    await conn.commit();
+    return res.json({ success: true, message: `${inserted} site berhasil diimpor` });
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, message: 'Gagal impor: Terdapat kode site yang duplikat/sudah ada' });
+    }
+    console.error('[SITE bulk]', e.message);
+    return res.status(500).json({ success: false, message: e.message || 'Server error' });
+  } finally {
+    conn.release();
+  }
+});
+
 /* GET /api/sites/:id */
 router.get('/:id', async (req, res) => {
   try {

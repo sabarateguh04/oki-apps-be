@@ -739,21 +739,29 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
         }
         const inputSn = text_value.trim();
 
-        // BARU: kalau item ini di-pre-assign ke 1 unit perangkat spesifik
-        // (admin udah nentuin duluan sebelum teknisi berangkat), cocokkan
-        // SN yang diketik teknisi ke serial_number unit itu.
+        // Cek pencocokan jika ada unit yang diekspektasikan (di-pre-assign admin)
         let matchStatus = 'N/A';
+        const [[ord]] = await conn.query(`SELECT site_id FROM oki_orders WHERE id = ?`, [req.params.id]);
+
         if (item.expected_perangkat_id) {
           const [[expected]] = await conn.query(`SELECT serial_number FROM oki_perangkat WHERE id = ?`, [item.expected_perangkat_id]);
           if (expected) {
             matchStatus = expected.serial_number.trim().toLowerCase() === inputSn.toLowerCase() ? 'MATCH' : 'MISMATCH';
-            if (matchStatus === 'MATCH') {
-              // Konfirmasi otomatis: unit ini beneran kepasang di site
-              // order ini -- update Master Perangkat jadi TERPAKAI.
-              const [[ord]] = await conn.query(`SELECT site_id FROM oki_orders WHERE id = ?`, [req.params.id]);
-              await conn.query(`UPDATE oki_perangkat SET status='TERPAKAI', site_id=? WHERE id = ?`, [ord.site_id, item.expected_perangkat_id]);
-            }
           }
+        }
+
+        // AUTO SYNC KE MASTER PERANGKAT (Selalu dilakukan, baik MATCH, MISMATCH, atau tidak ada ekspektasi)
+        const [[existing]] = await conn.query(`SELECT id FROM oki_perangkat WHERE serial_number = ?`, [inputSn]);
+        
+        if (existing) {
+          // Update unit yang sudah ada menjadi terpasang di site ini
+          await conn.query(`UPDATE oki_perangkat SET status='TERPAKAI', site_id=? WHERE id = ?`, [ord.site_id, existing.id]);
+        } else {
+          // Insert sebagai unit baru di Master Perangkat
+          await conn.query(
+            `INSERT INTO oki_perangkat (nama_perangkat, kategori, serial_number, status, site_id) VALUES (?, ?, ?, 'TERPAKAI', ?)`,
+            [item.template_name, item.category, inputSn, ord.site_id]
+          );
         }
 
         await conn.query(
@@ -764,13 +772,12 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
           [inputSn, req.user.id, matchStatus, item.id],
         );
 
-        // MISMATCH itu kejadian penting -- langsung kasih tau Admin biar
-        // segera direview (beda dari pengisian biasa yang sengaja senyap).
+        // MISMATCH itu kejadian penting -- langsung kasih tau Admin biar direview
         if (matchStatus === 'MISMATCH') {
           const [[tech]] = await conn.query(`SELECT nama FROM oki_technicians WHERE id = ?`, [req.user.id]);
           await logTimeline(
             req.params.id, 'NOTE',
-            `${tech.nama} input SN "${inputSn}" untuk "${item.template_name}" TIDAK COCOK dengan unit yang di-assign. Perlu direview Admin.`,
+            `${tech.nama} input SN "${inputSn}" untuk "${item.template_name}" TIDAK COCOK dengan unit yang di-assign (Master otomatis diperbarui). Perlu direview Admin.`,
             'TECHNICIAN', req.user.id, ['ADMIN'],
           );
         }

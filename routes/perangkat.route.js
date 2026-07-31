@@ -2,6 +2,13 @@ const express = require('express');
 const pool = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
+function requireAdminOrTechnician(req, res, next) {
+  if (req.user && (req.user.type === 'technician' || (req.user.type === 'staff' && req.user.role === 'ADMIN'))) {
+    return next();
+  }
+  return res.status(403).json({ success: false, message: 'Aksi ini hanya untuk Admin atau Teknisi' });
+}
+
 const router = express.Router();
 router.use(requireAuth);
 
@@ -35,6 +42,45 @@ router.get('/', async (req, res) => {
   }
 });
 
+/* POST /api/perangkat/bulk — Import Excel (ADMIN & TEKNISI) */
+router.post('/bulk', requireAdminOrTechnician, async (req, res) => {
+  const { perangkat } = req.body;
+  if (!Array.isArray(perangkat) || perangkat.length === 0) {
+    return res.status(400).json({ success: false, message: 'Data perangkat kosong atau tidak valid' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let inserted = 0;
+    for (const b of perangkat) {
+      if (!b.nama_perangkat || !b.serial_number) {
+        throw new Error('Kolom Nama Perangkat dan Serial Number wajib diisi');
+      }
+      const values = FIELDS.map(f => {
+        if (f === 'status') return b.status || 'TERSEDIA';
+        return b[f] === undefined || b[f] === '' ? null : b[f];
+      });
+      await conn.query(
+        `INSERT INTO oki_perangkat (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
+        values
+      );
+      inserted++;
+    }
+    await conn.commit();
+    return res.json({ success: true, message: `${inserted} perangkat berhasil diimpor` });
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, message: 'Gagal impor: Terdapat Serial Number yang sudah terdaftar' });
+    }
+    console.error('[PERANGKAT bulk]', e.message);
+    return res.status(500).json({ success: false, message: e.message || 'Server error' });
+  } finally {
+    conn.release();
+  }
+});
+
 /* GET /api/perangkat/:id */
 router.get('/:id', async (req, res) => {
   try {
@@ -54,8 +100,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/* POST /api/perangkat — HANYA ADMIN */
-router.post('/', requireRole('ADMIN'), async (req, res) => {
+/* POST /api/perangkat — ADMIN & TEKNISI (Mobile App) */
+router.post('/', requireAdminOrTechnician, async (req, res) => {
   const b = req.body;
   if (!b.nama_perangkat || !b.serial_number) {
     return res.status(400).json({ success: false, message: 'nama_perangkat dan serial_number wajib diisi' });
@@ -79,10 +125,10 @@ router.post('/', requireRole('ADMIN'), async (req, res) => {
   }
 });
 
-/* PUT /api/perangkat/:id — HANYA ADMIN
+/* PUT /api/perangkat/:id — ADMIN & TEKNISI (Mobile App)
    Dipakai juga buat ubah status manual (mis. jadi RUSAK/MAINTENANCE,
    atau balikin ke TERSEDIA pas unit ditarik dari site). */
-router.put('/:id', requireRole('ADMIN'), async (req, res) => {
+router.put('/:id', requireAdminOrTechnician, async (req, res) => {
   const b = req.body;
   try {
     const sets = FIELDS.filter(f => b[f] !== undefined);

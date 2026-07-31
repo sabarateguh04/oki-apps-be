@@ -35,8 +35,11 @@
             <label class="form-label small text-muted">Kategori</label>
             <input class="form-control form-control-sm" id="f-kategori" placeholder="mis. Router" onkeydown="if(event.key==='Enter')loadPerangkat()">
           </div>
-          <div class="col-md-3 text-end">
-            <button class="btn btn-primary btn-sm w-100" onclick="openModal()"><i class="bi bi-plus-lg"></i> Tambah Perangkat</button>
+          <div class="col-md-3 d-flex gap-2">
+            <button class="btn btn-outline-success btn-sm w-100" onclick="exportExcel()" title="Export Excel"><i class="bi bi-download"></i></button>
+            <button class="btn btn-outline-success btn-sm w-100" onclick="document.getElementById('importExcelInput').click()" title="Import Excel"><i class="bi bi-upload"></i></button>
+            <input type="file" id="importExcelInput" accept=".xlsx, .xls" style="display:none" onchange="importExcel(event)">
+            <button class="btn btn-primary btn-sm w-100" onclick="openModal()"><i class="bi bi-plus-lg"></i> Baru</button>
           </div>
         </div>
       </div>
@@ -101,6 +104,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
 <script>
@@ -230,14 +234,160 @@
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  // Function yang dipanggil dari onclick="..." di HTML wajib di-expose ke
-  // window karena attribute onclick cuma bisa akses global scope, sedangkan
-  // semua function di atas sekarang ke-scope di dalam IIFE ini.
+  async function exportExcel() {
+    if (!perangkatList.length) return toast('Tidak ada data untuk diexport', 'error');
+    toast('Membuat file Excel...', 'info');
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Master Perangkat');
+
+      sheet.columns = [
+        { header: 'ID Perangkat', key: 'id', width: 15 },
+        { header: 'Nama Perangkat', key: 'nama_perangkat', width: 30 },
+        { header: 'Kategori', key: 'kategori', width: 20 },
+        { header: 'Merk', key: 'merk', width: 15 },
+        { header: 'Model', key: 'model', width: 15 },
+        { header: 'Serial Number', key: 'serial_number', width: 25 },
+        { header: 'Spesifikasi', key: 'spesifikasi', width: 30 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'ID Site (Opsional)', key: 'site_id', width: 20 },
+        { header: 'Lokasi Terpasang', key: 'site_name', width: 30 }
+      ];
+
+      perangkatList.forEach(p => {
+        sheet.addRow({
+          id: p.id,
+          nama_perangkat: p.nama_perangkat,
+          kategori: p.kategori,
+          merk: p.merk,
+          model: p.model,
+          serial_number: p.serial_number,
+          spesifikasi: p.spesifikasi,
+          status: p.status,
+          site_id: p.site_id || '',
+          site_name: p.site_name || ''
+        });
+      });
+
+      const headerRow = sheet.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+      headerRow.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+
+      sheet.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) {
+          row.eachCell((cell) => {
+            cell.border = { top: { style: 'thin', color: { argb: 'FFDDDDDD' } }, left: { style: 'thin', color: { argb: 'FFDDDDDD' } }, bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } }, right: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
+          });
+        }
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Master_Perangkat.xlsx';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { toast('Gagal membuat file Excel', 'error'); }
+  }
+
+  async function importExcel(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    toast('Membaca file Excel...', 'info');
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const buffer = e.target.result;
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(buffer);
+          
+          const sheet = workbook.worksheets[0];
+          if (!sheet) throw new Error('File Excel kosong');
+          
+          const payload = [];
+          
+          const headerRow = sheet.getRow(1);
+          const cols = {};
+          headerRow.eachCell((cell, colNumber) => {
+            const val = cell.value ? String(cell.value).trim().toLowerCase() : '';
+            if (val.includes('nama perangkat')) cols.nama = colNumber;
+            if (val.includes('kategori')) cols.kategori = colNumber;
+            if (val.includes('merk')) cols.merk = colNumber;
+            if (val.includes('model')) cols.model = colNumber;
+            if (val.includes('serial number') || val.includes('sn')) cols.sn = colNumber;
+            if (val.includes('spesifikasi')) cols.spek = colNumber;
+            if (val.includes('status')) cols.status = colNumber;
+            if (val.includes('id site')) cols.siteId = colNumber;
+          });
+          
+          if (!cols.nama || !cols.sn) {
+            throw new Error('Format salah. Pastikan ada kolom "Nama Perangkat" dan "Serial Number"');
+          }
+          
+          sheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return;
+            
+            const nama = row.getCell(cols.nama).text;
+            const sn = row.getCell(cols.sn).text;
+            
+            if (!nama || !sn) return;
+            
+            let status = cols.status ? row.getCell(cols.status).text.trim().toUpperCase() : 'TERSEDIA';
+            if(!['TERSEDIA', 'TERPAKAI', 'RUSAK', 'MAINTENANCE'].includes(status)) status = 'TERSEDIA';
+
+            let siteId = null;
+            if (cols.siteId) {
+              const sid = parseInt(row.getCell(cols.siteId).value, 10);
+              if (sid && status === 'TERPAKAI') siteId = sid;
+            }
+            if (status === 'TERPAKAI' && !siteId) status = 'TERSEDIA';
+
+            payload.push({
+              nama_perangkat: nama.trim(),
+              serial_number: sn.trim(),
+              kategori: cols.kategori ? row.getCell(cols.kategori).text.trim() || null : null,
+              merk: cols.merk ? row.getCell(cols.merk).text.trim() || null : null,
+              model: cols.model ? row.getCell(cols.model).text.trim() || null : null,
+              spesifikasi: cols.spek ? row.getCell(cols.spek).text.trim() || null : null,
+              status: status,
+              site_id: siteId
+            });
+          });
+          
+          if (payload.length === 0) throw new Error('Tidak ada data valid yang bisa diimpor.');
+          if (!confirm(`Terdapat ${payload.length} perangkat valid untuk diimpor. Lanjutkan?`)) return;
+          
+          const res = await api('/api/perangkat/bulk', { method: 'POST', body: JSON.stringify({ perangkat: payload }) });
+          toast(res.message || 'Import berhasil', 'success');
+          loadPerangkat();
+        } catch (err) {
+          toast(err.message, 'error');
+        } finally {
+          document.getElementById('importExcelInput').value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      toast('Gagal memproses file', 'error');
+    }
+  }
+
   window.openModal = openModal;
   window.savePerangkat = savePerangkat;
   window.deletePerangkat = deletePerangkat;
   window.toggleSiteSelect = toggleSiteSelect;
   window.loadPerangkat = loadPerangkat;
+  window.exportExcel = exportExcel;
+  window.importExcel = importExcel;
 })();
 </script>
 </body>

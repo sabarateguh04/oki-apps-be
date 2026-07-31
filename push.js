@@ -3,14 +3,26 @@ const { getMessaging } = require('firebase-admin/messaging');
 const pool = require('./db');
 require('dotenv').config();
 
-initializeApp({
-  credential: cert(require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)),
-});
+let firebaseInitialized = false;
+
+if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+  try {
+    initializeApp({
+      credential: cert(require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)),
+    });
+    firebaseInitialized = true;
+  } catch (e) {
+    console.error('[PUSH] Gagal inisialisasi Firebase:', e.message);
+  }
+} else {
+  console.warn('[PUSH] FIREBASE_SERVICE_ACCOUNT_PATH tidak diset. Push notification dimatikan.');
+}
 
 /* Kirim push ke 1 teknisi. Dipanggil BERPASANGAN sama emitToTechnician(),
    di titik yang sama, supaya teknisi yang app-nya lagi kebuka dapet lewat
    socket, dan yang app-nya idle/killed dapet lewat FCM. */
 async function sendPushToTechnician(technicianId, title, body, data = {}) {
+  if (!firebaseInitialized) return;
   try {
     const [[tech]] = await pool.query(
       `SELECT fcm_token FROM oki_technicians WHERE id = ?`,
