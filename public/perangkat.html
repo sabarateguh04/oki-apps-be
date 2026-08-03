@@ -1,148 +1,180 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Task Operations Process System</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task Operations Process System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
 </head>
+
 <body>
 
-<div class="content">
-  <div id="topbar-slot"></div>
+  <div class="content">
+    <div id="topbar-slot"></div>
 
-  <div class="page-body">
-    <div class="card mb-3">
-      <div class="card-body">
-        <div class="row g-2 align-items-end">
-          <div class="col-md-3">
-            <label class="form-label small text-muted">Cari (nama/SN)</label>
-            <input class="form-control form-control-sm" id="f-search" placeholder="Ketik lalu Enter" onkeydown="if(event.key==='Enter')loadPerangkat()">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small text-muted">Status</label>
-            <select class="form-select form-select-sm" id="f-status" onchange="loadPerangkat()">
-              <option value="">Semua Status</option>
-              <option value="TERSEDIA">Tersedia</option>
-              <option value="TERPAKAI">Terpakai</option>
-              <option value="RUSAK">Rusak</option>
-              <option value="MAINTENANCE">Maintenance</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small text-muted">Kategori</label>
-            <input class="form-control form-control-sm" id="f-kategori" placeholder="mis. Router" onkeydown="if(event.key==='Enter')loadPerangkat()">
-          </div>
-          <div class="col-md-3 d-flex gap-2">
-            <button class="btn btn-outline-success btn-sm w-100" onclick="exportExcel()" title="Export Excel"><i class="bi bi-download"></i></button>
-            <button class="btn btn-outline-success btn-sm w-100" onclick="document.getElementById('importExcelInput').click()" title="Import Excel"><i class="bi bi-upload"></i></button>
-            <input type="file" id="importExcelInput" accept=".xlsx, .xls" style="display:none" onchange="importExcel(event)">
-            <button class="btn btn-primary btn-sm w-100" onclick="openModal()"><i class="bi bi-plus-lg"></i> Baru</button>
+    <div class="page-body">
+      <div class="card mb-3">
+        <div class="card-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label small text-muted">Cari (nama/SN)</label>
+              <input class="form-control form-control-sm" id="f-search" placeholder="Ketik lalu Enter"
+                onkeydown="if(event.key==='Enter')loadPerangkat()">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small text-muted">Status</label>
+              <select class="form-select form-select-sm" id="f-status" onchange="loadPerangkat()">
+                <option value="">Semua Status</option>
+                <option value="TERSEDIA">Tersedia</option>
+                <option value="TERPAKAI">Terpakai</option>
+                <option value="RUSAK">Rusak</option>
+                <option value="MAINTENANCE">Maintenance</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small text-muted">Kategori</label>
+              <input class="form-control form-control-sm" id="f-kategori" placeholder="mis. Router"
+                onkeydown="if(event.key==='Enter')loadPerangkat()">
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+              <button class="btn btn-outline-success btn-sm w-100" onclick="exportExcel()" title="Export Excel"><i
+                  class="bi bi-download"></i></button>
+              <button class="btn btn-outline-success btn-sm w-100"
+                onclick="document.getElementById('importExcelInput').click()" title="Import Excel"><i
+                  class="bi bi-upload"></i></button>
+              <input type="file" id="importExcelInput" accept=".xlsx, .xls" style="display:none"
+                onchange="importExcel(event)">
+              <button class="btn btn-primary btn-sm w-100" onclick="openModal()"><i class="bi bi-plus-lg"></i>
+                Baru</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="card-header"><i class="bi bi-hdd-network"></i> Master Perangkat</div>
-      <div class="card-body p-0">
-        <table class="table mb-0">
-          <thead><tr><th>Nama Perangkat</th><th>Kategori</th><th>Merk/Model</th><th>Serial Number</th><th>Status</th><th>Lokasi Terpasang</th><th class="text-end">Aksi</th></tr></thead>
-          <tbody id="perangkat-body">
-            <tr><td colspan="7"><div class="skeleton" style="height:18px;margin:8px 0;"></div></td></tr>
-          </tbody>
-        </table>
+      <div class="card">
+        <div class="card-header"><i class="bi bi-hdd-network"></i> Master Perangkat</div>
+        <div class="card-body p-0">
+          <table class="table mb-0">
+            <thead>
+              <tr>
+                <th>Nama Perangkat</th>
+                <th>Kategori</th>
+                <th>Merk/Model</th>
+                <th>Serial Number</th>
+                <th>Status</th>
+                <th>Lokasi Terpasang</th>
+                <th class="text-end">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="perangkat-body">
+              <tr>
+                <td colspan="7">
+                  <div class="skeleton" style="height:18px;margin:8px 0;"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<!-- Modal -->
-<div class="modal fade" id="perangkatModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content" style="border-radius:16px;">
-      <div class="modal-header">
-        <h5 class="modal-title" id="modal-title">Tambah Perangkat</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="p-id">
-        <div class="row">
-          <div class="col-md-8 mb-3"><label class="form-label">Nama Perangkat *</label><input class="form-control" id="p-nama" placeholder="mis. Router Mikrotik RB750"></div>
-          <div class="col-md-4 mb-3"><label class="form-label">Kategori</label><input class="form-control" id="p-kategori" placeholder="mis. Router" list="kategori-suggestions"><datalist id="kategori-suggestions"></datalist></div>
+  <!-- Modal -->
+  <div class="modal fade" id="perangkatModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content" style="border-radius:16px;">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modal-title">Tambah Perangkat</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="row">
-          <div class="col-md-4 mb-3"><label class="form-label">Merk</label><input class="form-control" id="p-merk"></div>
-          <div class="col-md-4 mb-3"><label class="form-label">Model</label><input class="form-control" id="p-model"></div>
-          <div class="col-md-4 mb-3"><label class="form-label">Serial Number *</label><input class="form-control" id="p-sn" placeholder="Unik per unit"></div>
-        </div>
-        <div class="mb-3"><label class="form-label">Spesifikasi</label><textarea class="form-control" id="p-spek" rows="2"></textarea></div>
-        <div class="row">
-          <div class="col-md-6 mb-3">
-            <label class="form-label">Status</label>
-            <select class="form-select" id="p-status">
-              <option value="TERSEDIA">Tersedia (di gudang)</option>
-              <option value="TERPAKAI">Terpakai</option>
-              <option value="RUSAK">Rusak</option>
-              <option value="MAINTENANCE">Maintenance</option>
-            </select>
+        <div class="modal-body">
+          <input type="hidden" id="p-id">
+          <div class="row">
+            <div class="col-md-8 mb-3"><label class="form-label">Nama Perangkat *</label><input class="form-control"
+                id="p-nama" placeholder="mis. Router Mikrotik RB750"></div>
+            <div class="col-md-4 mb-3"><label class="form-label">Kategori</label><input class="form-control"
+                id="p-kategori" placeholder="mis. Router" list="kategori-suggestions"><datalist
+                id="kategori-suggestions"></datalist></div>
           </div>
-          <div class="col-md-6 mb-3" id="site-select-wrap" style="display:none;">
-            <label class="form-label">Lokasi Terpasang (Site)</label>
-            <select class="form-select" id="p-site"><option value="">Pilih site...</option></select>
+          <div class="row">
+            <div class="col-md-4 mb-3"><label class="form-label">Merk</label><input class="form-control" id="p-merk">
+            </div>
+            <div class="col-md-4 mb-3"><label class="form-label">Model</label><input class="form-control" id="p-model">
+            </div>
+            <div class="col-md-4 mb-3"><label class="form-label">Serial Number *</label><input class="form-control"
+                id="p-sn" placeholder="Unik per unit"></div>
+          </div>
+          <div class="mb-3"><label class="form-label">Spesifikasi</label><textarea class="form-control" id="p-spek"
+              rows="2"></textarea></div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Status</label>
+              <select class="form-select" id="p-status">
+                <option value="TERSEDIA">Tersedia (di gudang)</option>
+                <option value="TERPAKAI">Terpakai</option>
+                <option value="RUSAK">Rusak</option>
+                <option value="MAINTENANCE">Maintenance</option>
+              </select>
+            </div>
+            <div class="col-md-6 mb-3" id="site-select-wrap" style="display:none;">
+              <label class="form-label">Lokasi Terpasang (Site)</label>
+              <select class="form-select" id="p-site">
+                <option value="">Pilih site...</option>
+              </select>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
-        <button class="btn btn-primary" onclick="savePerangkat()">Simpan</button>
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+          <button class="btn btn-primary" onclick="savePerangkat()">Simpan</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
-<script src="js/api.js"></script>
-<script src="js/layout.js"></script>
-<script>
-(function () {
-  const session = requireAuth(['staff']);
-  let modal, perangkatList = [], allSites = [];
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    (function () {
+      const session = requireAuth(['staff']);
+      let modal, perangkatList = [], allSites = [];
 
-  const STATUS_LABEL = { TERSEDIA: 'Tersedia', TERPAKAI: 'Terpakai', RUSAK: 'Rusak', MAINTENANCE: 'Maintenance' };
-  const STATUS_TONE = { TERSEDIA: 'badge-status-DONE', TERPAKAI: 'badge-priority-MEDIUM', RUSAK: 'badge-status-REJECTED', MAINTENANCE: 'badge-approval-PENDING' };
+      const STATUS_LABEL = { TERSEDIA: 'Tersedia', TERPAKAI: 'Terpakai', RUSAK: 'Rusak', MAINTENANCE: 'Maintenance' };
+      const STATUS_TONE = { TERSEDIA: 'badge-status-DONE', TERPAKAI: 'badge-priority-MEDIUM', RUSAK: 'badge-status-REJECTED', MAINTENANCE: 'badge-approval-PENDING' };
 
-  if (session && session.role !== 'ADMIN') {
-    document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Perangkat hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
-  } else if (session) {
-    renderLayout({ active: 'perangkat', title: 'Master Perangkat' });
-    loadPerangkat();
-  }
-
-  function statusBadgePerangkat(s) {
-    return `<span class="badge ${STATUS_TONE[s] || ''}">${STATUS_LABEL[s] || s}</span>`;
-  }
-
-  async function loadPerangkat() {
-    const body = document.getElementById('perangkat-body');
-    const params = new URLSearchParams();
-    const search = document.getElementById('f-search')?.value.trim();
-    const status = document.getElementById('f-status')?.value;
-    const kategori = document.getElementById('f-kategori')?.value.trim();
-    if (search) params.set('search', search);
-    if (status) params.set('status', status);
-    if (kategori) params.set('kategori', kategori);
-    try {
-      const d = await api(`/api/perangkat?${params.toString()}`);
-      perangkatList = d.perangkat;
-      if (!perangkatList.length) {
-        body.innerHTML = '<tr><td colspan="7"><div class="empty-state"><i class="bi bi-hdd-network"></i><p>Belum ada perangkat terdaftar</p></div></td></tr>';
-        return;
+      if (session && session.role !== 'ADMIN') {
+        document.body.innerHTML = '<div class="empty-state" style="margin:60px auto;"><i class="bi bi-shield-lock"></i><p>Master Perangkat hanya untuk role <b>Admin</b>.</p><a href="dashboard" class="btn btn-primary btn-sm">Kembali ke Dashboard</a></div>';
+      } else if (session) {
+        renderLayout({ active: 'perangkat', title: 'Master Perangkat' });
+        loadPerangkat();
       }
-      body.innerHTML = perangkatList.map(p => `
+
+      function statusBadgePerangkat(s) {
+        return `<span class="badge ${STATUS_TONE[s] || ''}">${STATUS_LABEL[s] || s}</span>`;
+      }
+
+      async function loadPerangkat() {
+        const body = document.getElementById('perangkat-body');
+        const params = new URLSearchParams();
+        const search = document.getElementById('f-search')?.value.trim();
+        const status = document.getElementById('f-status')?.value;
+        const kategori = document.getElementById('f-kategori')?.value.trim();
+        if (search) params.set('search', search);
+        if (status) params.set('status', status);
+        if (kategori) params.set('kategori', kategori);
+        try {
+          const d = await api(`/api/perangkat?${params.toString()}`);
+          perangkatList = d.perangkat;
+          if (!perangkatList.length) {
+            body.innerHTML = '<tr><td colspan="7"><div class="empty-state"><i class="bi bi-hdd-network"></i><p>Belum ada perangkat terdaftar</p></div></td></tr>';
+            return;
+          }
+          body.innerHTML = perangkatList.map(p => `
         <tr>
           <td><b>${escapeHtml(p.nama_perangkat)}</b></td>
           <td class="text-muted small">${escapeHtml(p.kategori || '-')}</td>
@@ -156,239 +188,240 @@
           </td>
         </tr>`).join('');
 
-      const cats = [...new Set(perangkatList.map(p => p.kategori).filter(Boolean))];
-      const dl = document.getElementById('kategori-suggestions');
-      if (dl) dl.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}">`).join('');
-    } catch (e) {
-      body.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">${e.message}</td></tr>`;
-    }
-  }
-
-  async function ensureSitesLoaded() {
-    if (allSites.length) return;
-    try {
-      const d = await api('/api/sites');
-      allSites = d.sites;
-    } catch (e) { /* diamkan, dropdown site cuma opsional */ }
-  }
-
-  async function openModal(id) {
-    if (!modal) modal = new bootstrap.Modal(document.getElementById('perangkatModal'));
-    await ensureSitesLoaded();
-    const sel = document.getElementById('p-site');
-    sel.innerHTML = '<option value="">Pilih site...</option>' + allSites.map(s => `<option value="${s.id}">${escapeHtml(s.site_name)} (${escapeHtml(s.nama_perusahaan)})</option>`).join('');
-
-    const p = perangkatList.find(x => x.id === id) || {};
-    document.getElementById('modal-title').textContent = id ? 'Edit Perangkat' : 'Tambah Perangkat';
-    document.getElementById('p-id').value = id || '';
-    document.getElementById('p-nama').value = p.nama_perangkat || '';
-    document.getElementById('p-kategori').value = p.kategori || '';
-    document.getElementById('p-merk').value = p.merk || '';
-    document.getElementById('p-model').value = p.model || '';
-    document.getElementById('p-sn').value = p.serial_number || '';
-    document.getElementById('p-spek').value = p.spesifikasi || '';
-    document.getElementById('p-status').value = p.status || 'TERSEDIA';
-    document.getElementById('p-site').value = p.site_id || '';
-    toggleSiteSelect();
-    modal.show();
-  }
-
-  document.addEventListener('change', (e) => { if (e.target.id === 'p-status') toggleSiteSelect(); });
-  function toggleSiteSelect() {
-    const status = document.getElementById('p-status').value;
-    document.getElementById('site-select-wrap').style.display = status === 'TERPAKAI' ? 'block' : 'none';
-  }
-
-  async function savePerangkat() {
-    const id = document.getElementById('p-id').value;
-    const status = document.getElementById('p-status').value;
-    const payload = {
-      nama_perangkat: document.getElementById('p-nama').value.trim(),
-      kategori: document.getElementById('p-kategori').value.trim(),
-      merk: document.getElementById('p-merk').value.trim(),
-      model: document.getElementById('p-model').value.trim(),
-      serial_number: document.getElementById('p-sn').value.trim(),
-      spesifikasi: document.getElementById('p-spek').value.trim(),
-      status,
-      site_id: status === 'TERPAKAI' ? (document.getElementById('p-site').value || null) : null,
-    };
-    if (!payload.nama_perangkat || !payload.serial_number) { toast('Nama perangkat dan serial number wajib diisi', 'error'); return; }
-    try {
-      if (id) {
-        await api(`/api/perangkat/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-      } else {
-        await api('/api/perangkat', { method: 'POST', body: JSON.stringify(payload) });
-      }
-      toast('Perangkat berhasil disimpan', 'success');
-      modal.hide();
-      loadPerangkat();
-    } catch (e) { toast(e.message, 'error'); }
-  }
-
-  async function deletePerangkat(id) {
-    if (!confirm('Hapus perangkat ini dari master?')) return;
-    try {
-      await api(`/api/perangkat/${id}`, { method: 'DELETE' });
-      toast('Perangkat dihapus', 'success');
-      loadPerangkat();
-    } catch (e) { toast(e.message, 'error'); }
-  }
-
-  async function exportExcel() {
-    if (!perangkatList.length) return toast('Tidak ada data untuk diexport', 'error');
-    toast('Membuat file Excel...', 'info');
-
-    try {
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('Master Perangkat');
-
-      sheet.columns = [
-        { header: 'ID Perangkat', key: 'id', width: 15 },
-        { header: 'Nama Perangkat', key: 'nama_perangkat', width: 30 },
-        { header: 'Kategori', key: 'kategori', width: 20 },
-        { header: 'Merk', key: 'merk', width: 15 },
-        { header: 'Model', key: 'model', width: 15 },
-        { header: 'Serial Number', key: 'serial_number', width: 25 },
-        { header: 'Spesifikasi', key: 'spesifikasi', width: 30 },
-        { header: 'Status', key: 'status', width: 15 },
-        { header: 'ID Site (Opsional)', key: 'site_id', width: 20 },
-        { header: 'Lokasi Terpasang', key: 'site_name', width: 30 }
-      ];
-
-      perangkatList.forEach(p => {
-        sheet.addRow({
-          id: p.id,
-          nama_perangkat: p.nama_perangkat,
-          kategori: p.kategori,
-          merk: p.merk,
-          model: p.model,
-          serial_number: p.serial_number,
-          spesifikasi: p.spesifikasi,
-          status: p.status,
-          site_id: p.site_id || '',
-          site_name: p.site_name || ''
-        });
-      });
-
-      const headerRow = sheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
-      headerRow.eachCell((cell) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
-        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      });
-
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) {
-          row.eachCell((cell) => {
-            cell.border = { top: { style: 'thin', color: { argb: 'FFDDDDDD' } }, left: { style: 'thin', color: { argb: 'FFDDDDDD' } }, bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } }, right: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
-          });
+          const cats = [...new Set(perangkatList.map(p => p.kategori).filter(Boolean))];
+          const dl = document.getElementById('kategori-suggestions');
+          if (dl) dl.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}">`).join('');
+        } catch (e) {
+          body.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">${e.message}</td></tr>`;
         }
-      });
+      }
 
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'Master_Perangkat.xlsx';
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (e) { toast('Gagal membuat file Excel', 'error'); }
-  }
-
-  async function importExcel(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    toast('Membaca file Excel...', 'info');
-    try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
+      async function ensureSitesLoaded() {
+        if (allSites.length) return;
         try {
-          const buffer = e.target.result;
-          const workbook = new ExcelJS.Workbook();
-          await workbook.xlsx.load(buffer);
-          
-          const sheet = workbook.worksheets[0];
-          if (!sheet) throw new Error('File Excel kosong');
-          
-          const payload = [];
-          
-          const headerRow = sheet.getRow(1);
-          const cols = {};
-          headerRow.eachCell((cell, colNumber) => {
-            const val = cell.value ? String(cell.value).trim().toLowerCase() : '';
-            if (val.includes('nama perangkat')) cols.nama = colNumber;
-            if (val.includes('kategori')) cols.kategori = colNumber;
-            if (val.includes('merk')) cols.merk = colNumber;
-            if (val.includes('model')) cols.model = colNumber;
-            if (val.includes('serial number') || val.includes('sn')) cols.sn = colNumber;
-            if (val.includes('spesifikasi')) cols.spek = colNumber;
-            if (val.includes('status')) cols.status = colNumber;
-            if (val.includes('id site')) cols.siteId = colNumber;
-          });
-          
-          if (!cols.nama || !cols.sn) {
-            throw new Error('Format salah. Pastikan ada kolom "Nama Perangkat" dan "Serial Number"');
+          const d = await api('/api/sites');
+          allSites = d.sites;
+        } catch (e) { /* diamkan, dropdown site cuma opsional */ }
+      }
+
+      async function openModal(id) {
+        if (!modal) modal = new bootstrap.Modal(document.getElementById('perangkatModal'));
+        await ensureSitesLoaded();
+        const sel = document.getElementById('p-site');
+        sel.innerHTML = '<option value="">Pilih site...</option>' + allSites.map(s => `<option value="${s.id}">${escapeHtml(s.site_name)} (${escapeHtml(s.nama_perusahaan)})</option>`).join('');
+
+        const p = perangkatList.find(x => x.id === id) || {};
+        document.getElementById('modal-title').textContent = id ? 'Edit Perangkat' : 'Tambah Perangkat';
+        document.getElementById('p-id').value = id || '';
+        document.getElementById('p-nama').value = p.nama_perangkat || '';
+        document.getElementById('p-kategori').value = p.kategori || '';
+        document.getElementById('p-merk').value = p.merk || '';
+        document.getElementById('p-model').value = p.model || '';
+        document.getElementById('p-sn').value = p.serial_number || '';
+        document.getElementById('p-spek').value = p.spesifikasi || '';
+        document.getElementById('p-status').value = p.status || 'TERSEDIA';
+        document.getElementById('p-site').value = p.site_id || '';
+        toggleSiteSelect();
+        modal.show();
+      }
+
+      document.addEventListener('change', (e) => { if (e.target.id === 'p-status') toggleSiteSelect(); });
+      function toggleSiteSelect() {
+        const status = document.getElementById('p-status').value;
+        document.getElementById('site-select-wrap').style.display = status === 'TERPAKAI' ? 'block' : 'none';
+      }
+
+      async function savePerangkat() {
+        const id = document.getElementById('p-id').value;
+        const status = document.getElementById('p-status').value;
+        const payload = {
+          nama_perangkat: document.getElementById('p-nama').value.trim(),
+          kategori: document.getElementById('p-kategori').value.trim(),
+          merk: document.getElementById('p-merk').value.trim(),
+          model: document.getElementById('p-model').value.trim(),
+          serial_number: document.getElementById('p-sn').value.trim(),
+          spesifikasi: document.getElementById('p-spek').value.trim(),
+          status,
+          site_id: status === 'TERPAKAI' ? (document.getElementById('p-site').value || null) : null,
+        };
+        if (!payload.nama_perangkat || !payload.serial_number) { toast('Nama perangkat dan serial number wajib diisi', 'error'); return; }
+        try {
+          if (id) {
+            await api(`/api/perangkat/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+          } else {
+            await api('/api/perangkat', { method: 'POST', body: JSON.stringify(payload) });
           }
-          
-          sheet.eachRow((row, rowNumber) => {
-            if (rowNumber === 1) return;
-            
-            const nama = row.getCell(cols.nama).text;
-            const sn = row.getCell(cols.sn).text;
-            
-            if (!nama || !sn) return;
-            
-            let status = cols.status ? row.getCell(cols.status).text.trim().toUpperCase() : 'TERSEDIA';
-            if(!['TERSEDIA', 'TERPAKAI', 'RUSAK', 'MAINTENANCE'].includes(status)) status = 'TERSEDIA';
+          toast('Perangkat berhasil disimpan', 'success');
+          modal.hide();
+          loadPerangkat();
+        } catch (e) { toast(e.message, 'error'); }
+      }
 
-            let siteId = null;
-            if (cols.siteId) {
-              const sid = parseInt(row.getCell(cols.siteId).value, 10);
-              if (sid && status === 'TERPAKAI') siteId = sid;
-            }
-            if (status === 'TERPAKAI' && !siteId) status = 'TERSEDIA';
+      async function deletePerangkat(id) {
+        if (!confirm('Hapus perangkat ini dari master?')) return;
+        try {
+          await api(`/api/perangkat/${id}`, { method: 'DELETE' });
+          toast('Perangkat dihapus', 'success');
+          loadPerangkat();
+        } catch (e) { toast(e.message, 'error'); }
+      }
 
-            payload.push({
-              nama_perangkat: nama.trim(),
-              serial_number: sn.trim(),
-              kategori: cols.kategori ? row.getCell(cols.kategori).text.trim() || null : null,
-              merk: cols.merk ? row.getCell(cols.merk).text.trim() || null : null,
-              model: cols.model ? row.getCell(cols.model).text.trim() || null : null,
-              spesifikasi: cols.spek ? row.getCell(cols.spek).text.trim() || null : null,
-              status: status,
-              site_id: siteId
+      async function exportExcel() {
+        if (!perangkatList.length) return toast('Tidak ada data untuk diexport', 'error');
+        toast('Membuat file Excel...', 'info');
+
+        try {
+          const workbook = new ExcelJS.Workbook();
+          const sheet = workbook.addWorksheet('Master Perangkat');
+
+          sheet.columns = [
+            { header: 'ID Perangkat', key: 'id', width: 15 },
+            { header: 'Nama Perangkat', key: 'nama_perangkat', width: 30 },
+            { header: 'Kategori', key: 'kategori', width: 20 },
+            { header: 'Merk', key: 'merk', width: 15 },
+            { header: 'Model', key: 'model', width: 15 },
+            { header: 'Serial Number', key: 'serial_number', width: 25 },
+            { header: 'Spesifikasi', key: 'spesifikasi', width: 30 },
+            { header: 'Status', key: 'status', width: 15 },
+            { header: 'ID Site (Opsional)', key: 'site_id', width: 20 },
+            { header: 'Lokasi Terpasang', key: 'site_name', width: 30 }
+          ];
+
+          perangkatList.forEach(p => {
+            sheet.addRow({
+              id: p.id,
+              nama_perangkat: p.nama_perangkat,
+              kategori: p.kategori,
+              merk: p.merk,
+              model: p.model,
+              serial_number: p.serial_number,
+              spesifikasi: p.spesifikasi,
+              status: p.status,
+              site_id: p.site_id || '',
+              site_name: p.site_name || ''
             });
           });
-          
-          if (payload.length === 0) throw new Error('Tidak ada data valid yang bisa diimpor.');
-          if (!confirm(`Terdapat ${payload.length} perangkat valid untuk diimpor. Lanjutkan?`)) return;
-          
-          const res = await api('/api/perangkat/bulk', { method: 'POST', body: JSON.stringify({ perangkat: payload }) });
-          toast(res.message || 'Import berhasil', 'success');
-          loadPerangkat();
-        } catch (err) {
-          toast(err.message, 'error');
-        } finally {
-          document.getElementById('importExcelInput').value = '';
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    } catch (err) {
-      toast('Gagal memproses file', 'error');
-    }
-  }
 
-  window.openModal = openModal;
-  window.savePerangkat = savePerangkat;
-  window.deletePerangkat = deletePerangkat;
-  window.toggleSiteSelect = toggleSiteSelect;
-  window.loadPerangkat = loadPerangkat;
-  window.exportExcel = exportExcel;
-  window.importExcel = importExcel;
-})();
-</script>
+          const headerRow = sheet.getRow(1);
+          headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+          headerRow.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D6EFD' } };
+            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+          });
+
+          sheet.eachRow((row, rowNumber) => {
+            if (rowNumber > 1) {
+              row.eachCell((cell) => {
+                cell.border = { top: { style: 'thin', color: { argb: 'FFDDDDDD' } }, left: { style: 'thin', color: { argb: 'FFDDDDDD' } }, bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } }, right: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
+              });
+            }
+          });
+
+          const buffer = await workbook.xlsx.writeBuffer();
+          const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'Master_Perangkat.xlsx';
+          a.click();
+          window.URL.revokeObjectURL(url);
+        } catch (e) { toast('Gagal membuat file Excel', 'error'); }
+      }
+
+      async function importExcel(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        toast('Membaca file Excel...', 'info');
+        try {
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+            try {
+              const buffer = e.target.result;
+              const workbook = new ExcelJS.Workbook();
+              await workbook.xlsx.load(buffer);
+
+              const sheet = workbook.worksheets[0];
+              if (!sheet) throw new Error('File Excel kosong');
+
+              const payload = [];
+
+              const headerRow = sheet.getRow(1);
+              const cols = {};
+              headerRow.eachCell((cell, colNumber) => {
+                const val = cell.value ? String(cell.value).trim().toLowerCase() : '';
+                if (val.includes('nama perangkat')) cols.nama = colNumber;
+                if (val.includes('kategori')) cols.kategori = colNumber;
+                if (val.includes('merk')) cols.merk = colNumber;
+                if (val.includes('model')) cols.model = colNumber;
+                if (val.includes('serial number') || val.includes('sn')) cols.sn = colNumber;
+                if (val.includes('spesifikasi')) cols.spek = colNumber;
+                if (val.includes('status')) cols.status = colNumber;
+                if (val.includes('id site')) cols.siteId = colNumber;
+              });
+
+              if (!cols.nama || !cols.sn) {
+                throw new Error('Format salah. Pastikan ada kolom "Nama Perangkat" dan "Serial Number"');
+              }
+
+              sheet.eachRow((row, rowNumber) => {
+                if (rowNumber === 1) return;
+
+                const nama = row.getCell(cols.nama).text;
+                const sn = row.getCell(cols.sn).text;
+
+                if (!nama || !sn) return;
+
+                let status = cols.status ? row.getCell(cols.status).text.trim().toUpperCase() : 'TERSEDIA';
+                if (!['TERSEDIA', 'TERPAKAI', 'RUSAK', 'MAINTENANCE'].includes(status)) status = 'TERSEDIA';
+
+                let siteId = null;
+                if (cols.siteId) {
+                  const sid = parseInt(row.getCell(cols.siteId).value, 10);
+                  if (sid && status === 'TERPAKAI') siteId = sid;
+                }
+                if (status === 'TERPAKAI' && !siteId) status = 'TERSEDIA';
+
+                payload.push({
+                  nama_perangkat: nama.trim(),
+                  serial_number: sn.trim(),
+                  kategori: cols.kategori ? row.getCell(cols.kategori).text.trim() || null : null,
+                  merk: cols.merk ? row.getCell(cols.merk).text.trim() || null : null,
+                  model: cols.model ? row.getCell(cols.model).text.trim() || null : null,
+                  spesifikasi: cols.spek ? row.getCell(cols.spek).text.trim() || null : null,
+                  status: status,
+                  site_id: siteId
+                });
+              });
+
+              if (payload.length === 0) throw new Error('Tidak ada data valid yang bisa diimpor.');
+              if (!confirm(`Terdapat ${payload.length} perangkat valid untuk diimpor. Lanjutkan?`)) return;
+
+              const res = await api('/api/perangkat/bulk', { method: 'POST', body: JSON.stringify({ perangkat: payload }) });
+              toast(res.message || 'Import berhasil', 'success');
+              loadPerangkat();
+            } catch (err) {
+              toast(err.message, 'error');
+            } finally {
+              document.getElementById('importExcelInput').value = '';
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        } catch (err) {
+          toast('Gagal memproses file', 'error');
+        }
+      }
+
+      window.openModal = openModal;
+      window.savePerangkat = savePerangkat;
+      window.deletePerangkat = deletePerangkat;
+      window.toggleSiteSelect = toggleSiteSelect;
+      window.loadPerangkat = loadPerangkat;
+      window.exportExcel = exportExcel;
+      window.importExcel = importExcel;
+    })();
+  </script>
 </body>
+
 </html>

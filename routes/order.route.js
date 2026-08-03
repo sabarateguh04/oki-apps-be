@@ -17,15 +17,15 @@ router.use(requireAuth);
    spam untuk event yang gak butuh aksi lanjutan dari staff lain, misal
    upload bukti kerja / isi 1 item checklist BA). */
 const NOTIF_ROLE_MAP = {
-  CREATED:     ['ATASAN'],           // order baru -> nunggu approval atasan
-  APPROVED:    ['ADMIN', 'FINANCE'], // admin lanjut assign, finance mulai bisa TF/beli
-  REJECTED:    ['ADMIN'],            // creator perlu tau order ditolak
-  ASSIGNED:    [],                   // teknisi udah dinotif jalur terpisah, staff lain gak urgent
-  ON_THE_WAY:  ['ADMIN'],
+  CREATED: ['ATASAN'],           // order baru -> nunggu approval atasan
+  APPROVED: ['ADMIN', 'FINANCE'], // admin lanjut assign, finance mulai bisa TF/beli
+  REJECTED: ['ADMIN'],            // creator perlu tau order ditolak
+  ASSIGNED: [],                   // teknisi udah dinotif jalur terpisah, staff lain gak urgent
+  ON_THE_WAY: ['ADMIN'],
   IN_PROGRESS: ['ADMIN'],
-  DONE:        ['ADMIN', 'FINANCE'], // admin bisa close, finance bisa TF biaya SESUDAH
-  CANCELLED:   ['ADMIN', 'ATASAN'],
-  NOTE:        [], // default skip -- override manual per pemanggilan kalau perlu
+  DONE: ['ADMIN', 'FINANCE'], // admin bisa close, finance bisa TF biaya SESUDAH
+  CANCELLED: ['ADMIN', 'ATASAN'],
+  NOTE: [], // default skip -- override manual per pemanggilan kalau perlu
 };
 
 /* BARU: dipakai gantiin emitToDashboard('order-updated', ...) polos --
@@ -292,9 +292,9 @@ router.get('/', async (req, res) => {
   try {
     let where = ' WHERE 1=1';
     const params = [];
-    if (status)          { where += ' AND o.status = ?';          params.push(status); }
-    if (priority)        { where += ' AND o.priority = ?';        params.push(priority); }
-    if (customer_id)     { where += ' AND o.customer_id = ?';     params.push(customer_id); }
+    if (status) { where += ' AND o.status = ?'; params.push(status); }
+    if (priority) { where += ' AND o.priority = ?'; params.push(priority); }
+    if (customer_id) { where += ' AND o.customer_id = ?'; params.push(customer_id); }
     if (approval_status) { where += ' AND o.approval_status = ?'; params.push(approval_status); }
 
     if (technician_id) {
@@ -752,7 +752,7 @@ router.post('/:id/ba-checklist/:checklistId', requireTechnician, handleUploadMul
 
         // AUTO SYNC KE MASTER PERANGKAT (Selalu dilakukan, baik MATCH, MISMATCH, atau tidak ada ekspektasi)
         const [[existing]] = await conn.query(`SELECT id FROM oki_perangkat WHERE serial_number = ?`, [inputSn]);
-        
+
         if (existing) {
           // Update unit yang sudah ada menjadi terpasang di site ini
           await conn.query(`UPDATE oki_perangkat SET status='TERPAKAI', site_id=? WHERE id = ?`, [ord.site_id, existing.id]);

@@ -28,10 +28,10 @@ router.get('/', async (req, res) => {
       LEFT JOIN oki_customers c ON c.id = s.customer_id
       WHERE 1=1`;
     const params = [];
-    if (status)   { sql += ` AND p.status = ?`;   params.push(status); }
+    if (status) { sql += ` AND p.status = ?`; params.push(status); }
     if (kategori) { sql += ` AND p.kategori = ?`; params.push(kategori); }
-    if (site_id)  { sql += ` AND p.site_id = ?`;  params.push(site_id); }
-    if (search)   { sql += ` AND (p.nama_perangkat LIKE ? OR p.serial_number LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
+    if (site_id) { sql += ` AND p.site_id = ?`; params.push(site_id); }
+    if (search) { sql += ` AND (p.nama_perangkat LIKE ? OR p.serial_number LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
     sql += ` ORDER BY p.nama_perangkat ASC`;
 
     const [rows] = await pool.query(sql, params);
