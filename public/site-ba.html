@@ -85,6 +85,33 @@
   </div>
 </div>
 
+<!-- Modal salin BA dari site lain -->
+<div class="modal fade" id="copyBaModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content" style="border-radius:16px;">
+      <div class="modal-header">
+        <h5 class="modal-title">Salin Master BA dari Site Lain</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning small mb-3">
+          <i class="bi bi-exclamation-triangle"></i> Menyalin BA akan menimpa/menghapus semua item checklist saat ini di site ini. Perangkat default tidak akan disalin karena spesifik untuk masing-masing site.
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Pilih Site Sumber *</label>
+          <select class="form-select" id="copy-source-site">
+            <option value="">-- Pilih Site Asal --</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+        <button class="btn btn-primary" onclick="copyBa()">Salin Sekarang</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="js/api.js"></script>
 <script src="js/layout.js"></script>
@@ -130,7 +157,8 @@
         <div class="card-body text-center py-5">
           <i class="bi bi-file-earmark-text" style="font-size:2.5rem;color:#adb5bd;"></i>
           <p class="text-muted mt-2 mb-3">Site ini belum punya Master BA.<br>Tanpa BA, teknisi upload bukti pekerjaan bebas seperti biasa.</p>
-          <button class="btn btn-primary" onclick="openCreateBa()"><i class="bi bi-plus-lg"></i> Buat Master BA</button>
+          <button class="btn btn-primary me-2" onclick="openCreateBa()"><i class="bi bi-plus-lg"></i> Buat Master BA</button>
+          <button class="btn btn-outline-primary" onclick="openCopyBaModal()"><i class="bi bi-copy"></i> Salin dari Site Lain</button>
         </div>
       </div>` : `
       <div class="card mb-3">
@@ -144,6 +172,7 @@
       <div class="card">
         <div class="card-header d-flex align-items-center">
           <span class="flex-grow-1"><i class="bi bi-list-check"></i> Item Checklist (${currentTemplates.length})</span>
+          <button class="btn btn-sm btn-outline-primary me-2" onclick="openCopyBaModal()"><i class="bi bi-copy"></i> Salin dari Site Lain</button>
           <button class="btn btn-sm btn-primary" onclick="openItemModal()"><i class="bi bi-plus-lg"></i> Tambah Item</button>
         </div>
         <div class="card-body">
@@ -281,6 +310,61 @@
       toast('Item checklist dihapus', 'success');
       load();
     } catch (e) { toast(e.message, 'error'); }
+  }
+
+  let copyBaModal;
+  async function openCopyBaModal() {
+    if (!copyBaModal) copyBaModal = new bootstrap.Modal(document.getElementById('copyBaModal'));
+    try {
+      const res = await api('/api/sites/with-ba');
+      const select = document.getElementById('copy-source-site');
+      select.innerHTML = '<option value="">-- Pilih Site Asal --</option>';
+
+      // Filter out current site
+      const otherSites = res.sites.filter(s => String(s.id) !== String(siteId));
+
+      if (otherSites.length === 0) {
+        toast('Tidak ada site lain yang memiliki Master BA', 'warning');
+        return;
+      }
+
+      otherSites.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.site_name} (${s.kode_site}) - BA: ${s.ba_name}`;
+        select.appendChild(opt);
+      });
+
+      copyBaModal.show();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  async function copyBa() {
+    const fromSiteId = document.getElementById('copy-source-site').value;
+    if (!fromSiteId) {
+      toast('Pilih site asal terlebih dahulu', 'error');
+      return;
+    }
+
+    if (currentTemplates.length > 0) {
+      if (!confirm('Apakah Anda yakin? Seluruh item checklist yang ada di site ini akan dihapus dan diganti dengan yang disalin.')) {
+        return;
+      }
+    }
+
+    try {
+      const res = await api(`/api/sites/${siteId}/ba/clone`, {
+        method: 'POST',
+        body: JSON.stringify({ fromSiteId })
+      });
+      toast(res.message || 'Berhasil menyalin Master BA', 'success');
+      copyBaModal.hide();
+      load();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   }
 </script>
 </body>

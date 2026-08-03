@@ -136,4 +136,77 @@ router.delete('/template/:templateId', requireRole('ADMIN'), async (req, res) =>
   }
 });
 
+/* POST /api/sites/:siteId/ba/clone — HANYA ADMIN */
+router.post('/clone', requireRole('ADMIN'), async (req, res) => {
+  const { fromSiteId } = req.body;
+  const toSiteId = req.params.siteId;
+
+  if (!fromSiteId) {
+    return res.status(400).json({ success: false, message: 'fromSiteId (ID Site asal) wajib ditentukan' });
+  }
+  if (String(fromSiteId) === String(toSiteId)) {
+    return res.status(400).json({ success: false, message: 'Site asal dan tujuan tidak boleh sama' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 1. Ambil data BA asal
+    const [[fromBa]] = await conn.query(
+      `SELECT * FROM oki_site_ba WHERE id_site = ?`,
+      [fromSiteId]
+    );
+    if (!fromBa) {
+      throw new Error('Site asal belum memiliki Master BA');
+    }
+
+    // 2. Ambil templates dari BA asal
+    const [fromTemplates] = await conn.query(
+      `SELECT * FROM oki_site_ba_template WHERE id_site_ba = ?`,
+      [fromBa.id]
+    );
+    if (fromTemplates.length === 0) {
+      throw new Error('Site asal tidak memiliki item checklist untuk disalin');
+    }
+
+    // 3. Cek atau Buat BA tujuan
+    let [[toBa]] = await conn.query(
+      `SELECT * FROM oki_site_ba WHERE id_site = ?`,
+      [toSiteId]
+    );
+    if (!toBa) {
+      const [insertBaResult] = await conn.query(
+        `INSERT INTO oki_site_ba (id_site, ba_name) VALUES (?, ?)`,
+        [toSiteId, fromBa.ba_name]
+      );
+      toBa = { id: insertBaResult.insertId, ba_name: fromBa.ba_name };
+    } else {
+      // Hapus templates lama jika menimpa yang sudah ada
+      await conn.query(
+        `DELETE FROM oki_site_ba_template WHERE id_site_ba = ?`,
+        [toBa.id]
+      );
+    }
+
+    // 4. Salin template items (default_perangkat_id di-set NULL karena perangkat spesifik per site)
+    for (const t of fromTemplates) {
+      await conn.query(
+        `INSERT INTO oki_site_ba_template (id_site_ba, category, template_name, template_type, note_ba, urutan, default_perangkat_id)
+         VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+        [toBa.id, t.category, t.template_name, t.template_type, t.note_ba, t.urutan]
+      );
+    }
+
+    await conn.commit();
+    return res.json({ success: true, message: `Berhasil menyalin ${fromTemplates.length} item checklist` });
+  } catch (e) {
+    await conn.rollback();
+    console.error('[SITE_BA clone]', e.message);
+    return res.status(500).json({ success: false, message: e.message || 'Server error' });
+  } finally {
+    conn.release();
+  }
+});
+
 module.exports = router;

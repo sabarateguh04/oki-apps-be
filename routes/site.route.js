@@ -74,6 +74,22 @@ router.post('/bulk', requireRole('ADMIN'), async (req, res) => {
   }
 });
 
+/* GET /api/sites/with-ba */
+router.get('/with-ba', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT s.id, s.site_name, s.kode_site, ba.ba_name
+       FROM oki_customer_sites s
+       JOIN oki_site_ba ba ON ba.id_site = s.id
+       ORDER BY s.site_name ASC`
+    );
+    return res.json({ success: true, sites: rows });
+  } catch (e) {
+    console.error('[SITE with-ba]', e.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 /* GET /api/sites/:id */
 router.get('/:id', async (req, res) => {
   try {
